@@ -556,6 +556,22 @@ then re-transcribed + re-embedded corpus-wide with the music gate on. Third-sess
   (BSD) for the already-fired criterion-4 word-timestamp trigger; jianfch/stable-ts (MIT)
   fallback. License traps to avoid: CrisperWhisper (CC-BY-NC), insightface pretrained
   weights (NC), edit-mind (proprietary).
+- **Second sweep (2026-07-12, from Rojan)**: **YueFan1014/VideoAgent** (ECCV'24,
+  Apache-2.0) — video-QA agent, two-phase: memory construction (segment captions +
+  object TRACKING/RE-ID memory), then an LLM with tools querying that memory. Not
+  liftable (24 GB GPU + OpenAI-key dependency; QA, not editing) but two concepts
+  adopted: (a) its tools-over-memory loop externally validates our typed read surface
+  as the agent API; (b) its object re-ID memory generalizes our face-identity item —
+  round-2+ candidate: an `entity` segment kind (persistent object/person identities
+  with time ranges), which is also what Q9-class action/subject queries need.
+  **codersbranch/video_search_engine**: commodity baseline (uniform frames → CLIP
+  B/32 → FAISS → Streamlit, 4 commits) — nothing to lift; useful as the contrast
+  point for what vindex adds (shots, ASR, cut-actionability, guards, eval).
+  **TiViBench follow-up** (Nikhil rates the paper highly): evolve the acceptance
+  suite into QUERY CLASSES with per-class scoring (spoken / visual-object /
+  visual-scene / action / lyric / negative-control), TiViBench-style hierarchical
+  taxonomy — Q9 just proved "action" is a distinct capability class that aggregate
+  pass rates would hide.
 - **Ops: ingest has no `running` job state** (it only writes done/failed at stage end),
   so a re-run over a previously failed ingest shows the stale `failed` row while ffmpeg
   is actively encoding — read the process, not the row. The per-source staging cache
