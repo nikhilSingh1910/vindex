@@ -15,3 +15,6 @@ uv.lock.pre-music-backup
 
 # macOS
 .DS_Store
+
+# Claude Code harness state
+.claude/scheduled_tasks.lock
