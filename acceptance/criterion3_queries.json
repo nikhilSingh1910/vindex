@@ -189,6 +189,44 @@
    "expected_fail": true
   },
   {
+   "id": "A3",
+   "video": "jobs2005",
+   "mode": "audio",
+   "class": "audio",
+   "kinds": [
+    "audio_window"
+   ],
+   "query": "crowd applauding and cheering",
+   "gt_ranges": [
+    [
+     15.1,
+     21.0
+    ],
+    [
+     282.0,
+     289.4
+    ],
+    [
+     537.0,
+     544.5
+    ],
+    [
+     691.8,
+     699.9
+    ],
+    [
+     779.3,
+     788.6
+    ],
+    [
+     872.3,
+     889.2
+    ]
+   ],
+   "containment_ok": true,
+   "gt_basis": "the six segmenter noise regions >=2s; their positions coincide with the speech's applause structure (the 16.9s region starts 0.3s after 'Thank you all very much.' ends — the ovation; mid-speech regions follow story beats). Segmenter is upstream of retrieval — same independence argument as whisper sentence bounds for Q1-Q3. THE discriminative audio-class test: applause vs 14 min of speech"
+  },
+  {
    "id": "N1",
    "video": "jobs2005",
    "mode": "visual",
@@ -219,6 +257,43 @@
    "class": "negative",
    "query": "the recipe for chocolate cake",
    "gt_ranges": []
+  },
+  {
+   "id": "A1",
+   "video": "coast",
+   "mode": "audio",
+   "class": "audio",
+   "query": "ocean waves crashing, sea ambience",
+   "gt_ranges": [
+    [
+     0.0,
+     664.27
+    ]
+   ],
+   "containment_ok": true,
+   "gt_basis": "full visual census (all 31 shots are coastal surf/water) supports waves audible throughout; smoke-level audio-class check — the whole clip is the target, so this verifies the space exists and returns coast audio, not fine discrimination. kinds-restricted to the audio space: an unrestricted query passed via a caption hit, measuring nothing about audio and leaving the audio negative-floor uncalibrated",
+   "kinds": [
+    "audio_window"
+   ]
+  },
+  {
+   "id": "A2",
+   "video": "credits",
+   "mode": "audio",
+   "class": "audio",
+   "query": "a man singing over music",
+   "gt_ranges": [
+    [
+     73.5,
+     80.5
+    ]
+   ],
+   "containment_ok": true,
+   "gt_basis": "the one range where singing is INDEPENDENTLY verified (whisper large-v3 and base agree on the lyric words at this offset, 2026-07-12); vocals likely elsewhere too but unverified — containment keeps other true windows from failing the query unfairly. NOTE: near-full-video music bed makes this smoke-level too. MARKED expected_fail after first run: credits is acoustically homogeneous (~90 sibling windows carry the same song), so requiring the single independently-verified window to out-rank its true siblings measures labeling luck, not retrieval; the audio class's discriminative test is A3. Un-xfail when a verified-vocals-complete gt exists",
+   "expected_fail": true,
+   "kinds": [
+    "audio_window"
+   ]
   }
  ]
 }

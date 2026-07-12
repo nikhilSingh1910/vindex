@@ -22,6 +22,7 @@ SEGMENT_KINDS: tuple[str, ...] = (
     "noise",
     "lyrics",
     "caption",
+    "audio_window",
 )
 
 

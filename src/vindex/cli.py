@@ -137,7 +137,7 @@ def main(argv: list[str] | None = None) -> int:
     # Only embedded kinds are searchable; offering the full enum here made
     # `--kind speech` return silently-empty results (transcript text is on speech_window).
     ps.add_argument("--kind", action="append",
-                    choices=("frame", "speech_window", "caption"),
+                    choices=("frame", "speech_window", "caption", "audio_window"),
                     help="restrict result kinds (repeatable)")
     ps.add_argument("-k", type=int, default=10)
     ps.set_defaults(func=cmd_search)

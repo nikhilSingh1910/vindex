@@ -613,6 +613,48 @@ then re-transcribed + re-embedded corpus-wide with the music gate on. Third-sess
     VAD-restored segments can span gated-out gaps → 30 s cap) + 7 minors fixed, 5
     verified-sound. First unit tests added (tests/test_word_align.py — tokenizer/WAV
     guards). All fixes re-verified by execution.
+- **CLAP audio space (2026-07-12, late evening) — built, twice adversarially reviewed,
+  execution-verified**: third RRF space, kind='audio_window' (fixed 10 s tiling — audio
+  has no shot boundaries; a window IS its cut range), laion/clap-htsat-unfused via
+  transformers (zero new deps), 48 kHz mono WAV extracted at embed time from the
+  mezzanine (atomic .part+rename; the 16 kHz ASR WAV would cap content at 8 kHz), CLAP
+  loaded FIRST in embed to front download risk. Corpus: coast 67 / credits 93 /
+  jobs2005 91 windows; image/text spaces byte-identical. **Capability proof: A3
+  ("crowd applauding and cheering", kinds-restricted) finds the standing ovation at
+  rank 1** (segmenter-noise-anchored gt; the 16.9 s region starts 0.3 s after "Thank
+  you all very much."). Suite steady state: **14 passed / 3 xfailed / exit 0**.
+  - **Measured property, exemption shipped**: CLAP text→audio distances are NOT
+    comparable across queries — a nonsense query's nearest window (0.334) scores
+    closer than the loosest true hit (0.676) — so the negative-floor assumption fails
+    for this space; negatives exempt audio (documented in the scorer), and raw audio
+    `dist` in CLI output must never be read as confidence (noted on SearchResult).
+    Roadmap: query-relative negative calibration.
+  - **A-class labeling lessons**: unrestricted A1 passed via a CAPTION hit (measuring
+    nothing about audio) → per-query `kinds` restriction added to the harness; A2
+    xfail'd honestly — credits is acoustically homogeneous (~90 sibling windows of one
+    song; the verified window ranks 19/93 among its own true siblings), so the audio
+    class's discriminative test needs acoustically DIVERSE content (A3/jobs2005; add
+    such a clip to the round-3 corpus). A3's pass margin is thin (IoU 0.5198 vs 0.5).
+  - **Review harvest (2 lenses, ~18 findings)**: fixed pre-ship — partial 48k WAV
+    cached forever (both modes live-reproduced: 0-byte crash-loop AND placeholder
+    header silently truncating 1200 s→49 s of coverage; now atomic + stderr surfaced);
+    `padding=True` silently zero-pads instead of the checkpoint's trained `repeatpad`
+    (tail windows of all 3 videos were off-distribution; kwarg dropped); unseeded
+    rand_trunc on merged 10-12 s tails → nondeterministic re-embeds (deterministic cap
+    at win_s now); stale audio rows surviving an empty-WAV edge (unconditional
+    replace); waveform held resident through SigLIP/bge (released); search-lifetime
+    lru caches for SigLIP/CLAP (suite was reloading both per query — 7+ min for 17
+    queries). MPS cleared by measurement (CLAP cos 1.0 vs CPU). Accepted with notes:
+    full-WAV materialization ~5x transient (3-hour video ≈ 5.2 GB peak — stream/memmap
+    before long-form corpora; same ceiling class as word_align); CLAP fp32 (~615 MB;
+    fp16-on-MPS unverified, revisit); permanent 48k WAVs ~350 MB/content-hour (no
+    eviction policy yet); partial-rollout searches silently lack the audio space
+    (ship a stage-level re-embed command before multi-video migrations); HF cache
+    holds CLAP twice (bin + safetensors snapshots, ~1.2 GB — prune).
+  - **Fusion structure note**: with 3 kind-disjoint spaces, fused top-3 is always the
+    three per-space rank-1s (RRF tie at 1/61, admit-order tiebreak) — spoken hits now
+    sit at fused rank 2 behind an irrelevant image rank-1. Round-3: per-space k,
+    weighted fusion, or rank-2 admission.
 - **Ops: ingest has no `running` job state** (it only writes done/failed at stage end),
   so a re-run over a previously failed ingest shows the stale `failed` row while ffmpeg
   is actively encoding — read the process, not the row. The per-source staging cache

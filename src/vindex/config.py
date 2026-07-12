@@ -95,6 +95,12 @@ class Config:
     # --- embed ---
     window_target_s: float = 45.0  # transcript window packing target (~30-60 s)
     window_max_s: float = 60.0
+    # CLAP audio space: fixed tiling at the model's native 10 s training crop. Audio has
+    # no shot boundaries; the read contract still refines nothing here (a window IS the
+    # cut range) — coarse but honest discovery granularity.
+    audio_window_s: float = 10.0
+    # Trailing remainder shorter than this merges into the previous window.
+    audio_window_min_s: float = 2.0
 
     # --- caption (Ollama) ---
     ollama_url: str = "http://localhost:11434"

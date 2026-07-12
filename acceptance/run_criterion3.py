@@ -28,6 +28,13 @@ from vindex.search import search
 
 WORKDIR = Path(__file__).resolve().parents[1] / "vindex_data"
 
+# Spaces whose distances are NOT comparable across queries, breaking the floor
+# assumption that true hits score closer than junk: measured 2026-07-12, a nonsense
+# query's nearest CLAP audio window (0.3345) scored closer than the loosest true
+# audio hit (0.676). Negatives skip these spaces; query-relative calibration is the
+# roadmapped replacement (PLAN round-2/3).
+NEGATIVE_FLOOR_EXEMPT = frozenset({"audio"})
+
 
 def iou(a: tuple[float, float], b: tuple[float, float]) -> float:
     inter = max(0.0, min(a[1], b[1]) - max(a[0], b[0]))
@@ -66,7 +73,8 @@ def main() -> int:
             negatives.append(q)  # scored after positives calibrate the floors
             continue
         query = q.get("query_final") or q["query"]
-        results = search(cfg, query, video_id=q["video"], k=3)
+        results = search(cfg, query, video_id=q["video"], k=3,
+                         kinds=tuple(q["kinds"]) if q.get("kinds") else None)
         hit = find_hit(results, [tuple(g) for g in q["gt_ranges"]], bool(q.get("containment_ok")))
         expect_fail = bool(q.get("expected_fail"))
         if hit:
@@ -96,10 +104,13 @@ def main() -> int:
 
     for q in negatives:
         cls = q.get("class", "negative")
-        results = search(cfg, q.get("query_final") or q["query"], video_id=q["video"], k=3)
+        results = search(cfg, q.get("query_final") or q["query"], video_id=q["video"], k=3,
+                         kinds=tuple(q["kinds"]) if q.get("kinds") else None)
         breaches, uncalibrated = {}, set()
         for r in results:
             for space, (_, dist) in r.per_space.items():
+                if space in NEGATIVE_FLOOR_EXEMPT:
+                    continue
                 if space not in floor:
                     uncalibrated.add(space)
                 elif dist <= floor[space]:
@@ -122,7 +133,8 @@ def main() -> int:
                   f"true-hit range")
 
     print(f"\nnegative-floor calibration (loosest true-hit distance per space): "
-          f"{ {s: round(f, 4) for s, f in floor.items()} }")
+          f"{ {s: round(f, 4) for s, f in floor.items()} }"
+          f"{f'; exempt from negative checks: {sorted(NEGATIVE_FLOOR_EXEMPT)}' if NEGATIVE_FLOOR_EXEMPT else ''}")
     for cls in sorted(by_class):
         entries = by_class[cls]
         n_ok = sum(mark == "+" for _, mark in entries)

@@ -1,4 +1,4 @@
-"""Stage 6 — embed. Two embedding spaces, one column:
+"""Stage 6 — embed. Three embedding spaces, one column:
 
 - Images: SigLIP (so400m) on every kept keyframe's persisted JPEG -> embedding on the
   kind='frame' row. fp16 with torch_dtype set EXPLICITLY (the HF checkpoint ships F32 —
@@ -7,6 +7,10 @@
   Whisper segment boundaries, carrying word-timestamp anchors) -> new kind='speech_window'
   rows; and on caption descriptions when stage 5 lands (kind='caption' rows are embedded
   if present, so the stage is caption-ready without modification).
+- Audio: CLAP on fixed 10 s windows (the model's native crop; audio has no shot
+  boundaries) -> new kind='audio_window' rows. Source audio is a 48 kHz mono WAV
+  extracted from the mezzanine on first need (backward-compatible with already-ingested
+  videos; the 16 kHz ASR WAV would cap content at 8 kHz — wrong domain for CLAP).
 
 Embeddings are float32 little-endian BLOBs (sqlite-vec scalar-function format). Every
 embedded row stores model_name + dim — mixed dimensions share the one column, and search
@@ -15,7 +19,9 @@ scopes each KNN by model_name (PLAN Search section).
 
 from __future__ import annotations
 
+import subprocess
 from dataclasses import dataclass
+from pathlib import Path
 
 from ..config import Config
 from ..models import Segment
@@ -30,6 +36,8 @@ SIGLIP_CANDIDATES = (
     "google/siglip-so400m-patch14-384",
 )
 TEXT_MODEL = "BAAI/bge-small-en-v1.5"
+AUDIO_MODEL = "laion/clap-htsat-unfused"
+_CLAP_SR = 48000  # CLAP's expected input rate
 
 
 class EmbedError(RuntimeError):
@@ -96,6 +104,109 @@ def _embed_images(sig: _Siglip, paths: list[str], batch_size: int = 8) -> list[b
     return out
 
 
+@dataclass
+class _Clap:
+    model: object
+    processor: object
+    name: str
+    device: str
+    dim: int
+
+
+def _load_clap() -> _Clap:
+    from transformers import AutoProcessor, ClapModel
+
+    device = _pick_device()
+    model = ClapModel.from_pretrained(AUDIO_MODEL).to(device).eval()
+    processor = AutoProcessor.from_pretrained(AUDIO_MODEL)
+    return _Clap(model=model, processor=processor, name=AUDIO_MODEL, device=device,
+                 dim=int(model.config.projection_dim))
+
+
+def audio_windows(duration_s: float, win_s: float, min_s: float) -> list[tuple[float, float]]:
+    """Fixed tiling of [0, duration): full windows of win_s; a trailing remainder >= min_s
+    becomes its own window, else it merges into the previous one (or stands alone when the
+    whole clip is shorter than min_s — better one short window than none)."""
+    if duration_s <= 0:
+        return []
+    out: list[tuple[float, float]] = []
+    t = 0.0
+    while t + win_s <= duration_s:
+        out.append((t, t + win_s))
+        t += win_s
+    if duration_s - t > 1e-9:
+        if duration_s - t >= min_s or not out:
+            out.append((t, duration_s))
+        else:
+            out[-1] = (out[-1][0], duration_s)
+    return out
+
+
+def _ensure_audio48k(cfg: Config, video_id: str, mezz: Path) -> Path | None:
+    """Extract (once) the 48 kHz mono WAV the audio space embeds. Returns None when the
+    mezzanine has no audio stream — an audio-less video simply has no audio space.
+    Writes temp + os.replace: a killed ffmpeg must never leave a truncated WAV that a
+    later run would silently trust as the real audio (reviewed: cached-partial hazard)."""
+    import os
+
+    from .. import ffmpeg_utils as ff
+
+    out = cfg.video_dir(video_id) / "audio_48k_mono.wav"
+    if out.exists():
+        return out
+    if ff.probe(mezz).first("audio") is None:
+        return None
+    tmp = out.with_suffix(".wav.part")
+    try:
+        subprocess.run(
+            ["ffmpeg", "-y", "-i", str(mezz), "-vn",
+             "-af", "aresample=async=1:first_pts=0",  # same clock re-pin as the ASR WAV
+             "-ac", "1", "-ar", str(_CLAP_SR), "-c:a", "pcm_s16le", str(tmp)],
+            check=True, capture_output=True,
+        )
+    except subprocess.CalledProcessError as e:
+        tmp.unlink(missing_ok=True)
+        raise EmbedError(
+            f"48 kHz extraction failed for {video_id}: "
+            f"{(e.stderr or b'').decode(errors='replace')[-500:]}") from e
+    os.replace(tmp, out)
+    return out
+
+
+def _embed_audio(clap: _Clap, waveform, windows: list[tuple[float, float]],
+                 win_s: float, batch_size: int = 8) -> list[bytes]:
+    import numpy as np
+    import torch
+
+    # One window's worth of samples. Merged tail windows (win_s, win_s+min_s] are capped
+    # to this: CLAP's rand_trunc path would otherwise embed an UNSEEDED random crop
+    # (nondeterministic re-embeds). A capped tail embeds its first win_s seconds —
+    # deterministic, and the row's t-range still reflects the window it stands for.
+    max_samples = int(win_s * _CLAP_SR)
+    out: list[bytes] = []
+    for i in range(0, len(windows), batch_size):
+        chunks = [waveform[int(t0 * _CLAP_SR): min(int(t1 * _CLAP_SR),
+                                                   int(t0 * _CLAP_SR) + max_samples)]
+                  for t0, t1 in windows[i: i + batch_size]]
+        # No padding kwarg: `padding=True` silently overrides the checkpoint's
+        # configured 'repeatpad' with zero-padding (verified against transformers
+        # 5.13.1), mis-embedding every sub-10 s tail window. Each chunk is padded to
+        # the model's fixed 10 s input independently — there is no pad-to-longest.
+        inputs = clap.processor(
+            audio=chunks, sampling_rate=_CLAP_SR, return_tensors="pt",
+        ).to(clap.device)
+        with torch.no_grad():
+            feats = clap.model.get_audio_features(**inputs)
+        # transformers 5.x wraps projected features like SigLIP 2 does (PLAN facts #31).
+        if not torch.is_tensor(feats):
+            feats = feats.pooler_output
+        assert feats.shape[-1] == clap.dim, \
+            f"CLAP audio features dim {feats.shape[-1]} != projection_dim {clap.dim}"
+        feats = torch.nn.functional.normalize(feats.float(), dim=-1).cpu().numpy()
+        out.extend(np.ascontiguousarray(v, dtype=np.float32).tobytes() for v in feats)
+    return out
+
+
 def _load_text_model():
     from sentence_transformers import SentenceTransformer
 
@@ -146,6 +257,49 @@ def run(video_id: str, cfg: Config, conn) -> dict:
     fps = video.fps
     last_frame = video.frame_count - 1
 
+    # --- audio: CLAP over fixed windows of the 48 kHz mono extraction ------------------
+    from .transcribe import _frame_end, _frame_start
+
+    span_s = video.frame_count * video.fps_den / video.fps_num
+    n_audio = 0
+    wav48 = _ensure_audio48k(cfg, video_id, Path(video.media_path))
+    if wav48 is not None:
+        from .word_align import _load_wav  # stdlib WAV reader; validates mono s16le rate
+
+        waveform = _load_wav(wav48, _CLAP_SR)[0].numpy()  # 1-D float32
+        # Tile the timeline both streams cover: cut math is bound to the video clock,
+        # and slices past the audio's end would embed nothing.
+        tile_span = min(span_s, waveform.shape[0] / _CLAP_SR)
+        windows = audio_windows(tile_span, cfg.audio_window_s, cfg.audio_window_min_s)
+        rows = []
+        blobs: list[bytes] = []
+        if windows:
+            clap = _load_clap()
+            blobs = _embed_audio(clap, waveform, windows, cfg.audio_window_s)
+            for t0, t1 in windows:
+                fs = _frame_start(t0, fps, last_frame)
+                rows.append(Segment(
+                    video_id=video_id, kind="audio_window",
+                    t_start_s=t0, t_end_s=t1,
+                    frame_start=fs, frame_end=_frame_end(t1, fps, last_frame, fs, span_s),
+                    model_name=clap.name, dim=clap.dim,
+                    payload={"win_s": cfg.audio_window_s},
+                ))
+        # Unconditional replace: a zero-window outcome (e.g. an empty WAV) must clear
+        # any prior rows rather than leave them as stale truth (reviewed).
+        storage.replace_segments(conn, video_id, ("audio_window",), rows)
+        if rows:
+            inserted = storage.list_segments(conn, video_id, kind="audio_window")
+            for seg, blob in zip(inserted, blobs):
+                assert seg.id is not None
+                storage.set_embedding(conn, seg.id, blob, clap.name, clap.dim)
+            n_audio = len(rows)
+            del clap  # release before SigLIP loads
+        del waveform
+    else:
+        # No audio stream: an existing audio space would be stale truth on re-run.
+        storage.replace_segments(conn, video_id, ("audio_window",), [])
+
     # --- images: every kept keyframe ---------------------------------------------------
     frames = storage.list_segments(conn, video_id, kind="frame")
     n_images = 0
@@ -173,9 +327,6 @@ def run(video_id: str, cfg: Config, conn) -> dict:
 
         windows = build_windows(speech, cfg.window_target_s, cfg.window_max_s)
         if windows:
-            from .transcribe import _frame_end, _frame_start
-
-            span_s = video.frame_count * video.fps_den / video.fps_num
             rows = []
             for t0, t1, text, ids in windows:
                 fs = _frame_start(t0, fps, last_frame)
@@ -209,6 +360,8 @@ def run(video_id: str, cfg: Config, conn) -> dict:
     return {
         "image_embeddings": n_images,
         "image_model": siglip_name,
+        "audio_windows": n_audio,
+        "audio_model": AUDIO_MODEL if n_audio else None,
         "speech_windows": n_windows,
         "caption_embeddings": n_captions,
         "text_model": TEXT_MODEL if (n_windows or n_captions) else None,

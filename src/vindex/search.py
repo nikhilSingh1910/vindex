@@ -6,9 +6,10 @@ scales). Structured filters (video, kind) apply BEFORE fusion. The exhaustive co
 for "all X" tasks is `vindex list` / storage.list_segments — search never guarantees
 completeness (PLAN: destructive edits must be driven by list, not top-k).
 
-Two query routes per PLAN:
+Three query routes per PLAN:
 - query -> SigLIP text tower -> image space (kind='frame' rows)
 - query -> bge (with its retrieval prefix) -> text space (speech_window + caption rows)
+- query -> CLAP text tower -> audio space (kind='audio_window' rows)
 """
 
 from __future__ import annotations
@@ -29,6 +30,24 @@ def _text_model():
 
     return _load_text_model()
 
+
+@functools.lru_cache(maxsize=1)
+def _siglip():
+    """Search-lifetime cache (same contract as _text_model): an in-process caller
+    issuing many queries — the acceptance suite, a future API — must not reload the
+    ~750 MB encoder per call (measured: 17 suite queries reloading it took 7+ min)."""
+    from .stages.embed import _load_siglip
+
+    return _load_siglip()
+
+
+@functools.lru_cache(maxsize=1)
+def _clap():
+    """Search-lifetime cache; see _siglip."""
+    from .stages.embed import _load_clap
+
+    return _load_clap()
+
 # Standard RRF constant (Cormack et al.); rank is 1-based.
 RRF_K = 60
 
@@ -37,13 +56,18 @@ BGE_QUERY_PREFIX = "Represent this sentence for searching relevant passages: "
 
 IMAGE_KINDS = ("frame",)
 TEXT_KINDS = ("speech_window", "caption")
+AUDIO_KINDS = ("audio_window",)
 
 
 @dataclass
 class SearchResult:
     segment: Segment
     rrf_score: float
-    per_space: dict[str, tuple[int, float]]  # space -> (rank, raw cosine distance)
+    # space -> (rank, raw cosine distance). CAUTION: audio (CLAP) distances are not
+    # comparable ACROSS queries — a nonsense query's nearest window can score closer
+    # than a true hit's (measured 0.334 vs 0.676). Rank within a query is meaningful;
+    # the raw distance is not a confidence.
+    per_space: dict[str, tuple[int, float]]
     # The CUT-ACTIONABLE range (PLAN end goal: exact ranges, not containers to spelunk):
     # speech_window hits refine to their best-matching constituent speech segment (which
     # carries the word anchors); frame hits expand to their enclosing shot. Falls back to
@@ -56,9 +80,7 @@ def _encode_query_image_space(query: str) -> tuple[bytes, str]:
     import numpy as np
     import torch
 
-    from .stages.embed import _load_siglip
-
-    sig = _load_siglip()
+    sig = _siglip()
     inputs = sig.processor(
         text=[query], return_tensors="pt", padding="max_length", max_length=64
     ).to(sig.device)
@@ -78,6 +100,22 @@ def _encode_query_text_space(query: str) -> tuple[bytes, str]:
     tm = _text_model()
     v = tm.encode([BGE_QUERY_PREFIX + query], normalize_embeddings=True)[0]
     return np.ascontiguousarray(v, dtype=np.float32).tobytes(), TEXT_MODEL
+
+
+def _encode_query_audio_space(query: str) -> tuple[bytes, str]:
+    import numpy as np
+    import torch
+
+    clap = _clap()
+    inputs = clap.processor(text=[query], return_tensors="pt").to(clap.device)
+    with torch.no_grad():
+        feats = clap.model.get_text_features(**inputs)
+    if not torch.is_tensor(feats):  # transformers 5.x wrapper (PLAN facts #31)
+        feats = feats.pooler_output
+    assert feats.shape[-1] == clap.dim, \
+        f"CLAP text features dim {feats.shape[-1]} != projection_dim {clap.dim}"
+    v = torch.nn.functional.normalize(feats.float(), dim=-1).cpu().numpy()[0]
+    return np.ascontiguousarray(v, dtype=np.float32).tobytes(), clap.name
 
 
 def _require_stored_space(conn, model: str, kinds: tuple[str, ...],
@@ -101,7 +139,7 @@ def search(
 ) -> list[SearchResult]:
     """kinds, when given, restricts which segment kinds may appear (pre-fusion filter);
     spaces whose kinds are entirely filtered out are skipped (their model never loads)."""
-    searchable = IMAGE_KINDS + TEXT_KINDS
+    searchable = IMAGE_KINDS + TEXT_KINDS + AUDIO_KINDS
     if kinds is not None and not any(kk in searchable for kk in kinds):
         # A silently empty result here is indistinguishable from a genuine miss — and an
         # editing agent would act on it. Transcript text lives on 'speech_window' rows.
@@ -119,6 +157,7 @@ def search(
 
         image_kinds = tuple(kk for kk in IMAGE_KINDS if kinds is None or kk in kinds)
         text_kinds = tuple(kk for kk in TEXT_KINDS if kinds is None or kk in kinds)
+        audio_kinds = tuple(kk for kk in AUDIO_KINDS if kinds is None or kk in kinds)
 
         if image_kinds:
             qblob, model = _encode_query_image_space(query)
@@ -133,6 +172,13 @@ def search(
             admit("text", storage.knn_segments(
                 conn, model_name=model, query=qblob, k=k,
                 video_id=video_id, kinds=text_kinds,
+            ))
+        if audio_kinds:
+            qblob, model = _encode_query_audio_space(query)
+            _require_stored_space(conn, model, audio_kinds, video_id)
+            admit("audio", storage.knn_segments(
+                conn, model_name=model, query=qblob, k=k,
+                video_id=video_id, kinds=audio_kinds,
             ))
 
         results = [
