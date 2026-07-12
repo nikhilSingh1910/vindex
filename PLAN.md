@@ -584,6 +584,35 @@ then re-transcribed + re-embedded corpus-wide with the music gate on. Third-sess
   corpus-scale cost lever (nomic-embed v1.5 is a local Apache-2.0 MRL model) —
   round 3. Verified during study: search.py already applies bge's asymmetric
   BGE_QUERY_PREFIX at query time — no free win being missed.
+- **Round-2 quick-wins bundle (2026-07-12, evening) — built, adversarially reviewed,
+  execution-verified**:
+  - **Criterion 4 CLOSED — word-timestamp forced alignment**: wav2vec2 CTC alignment
+    (torchaudio `forced_align`, new `align` extra) refines whisper word t0/t1 in place
+    post-transcribe; English-only, per-segment fallback, preflighted BEFORE the whisper
+    pass, model released after. Chosen over the whisperx package to avoid dragging
+    pyannote-audio; over torchaudio.load to avoid torchcodec (ingest's pinned 16 kHz
+    mono WAV reads with stdlib `wave`). jobs2005 re-run: 330/330 rows aligned, 0
+    fallbacks, 2281/2297 words moved (16 digit/symbol words keep whisper timing,
+    sanitized) → **start>=end 24 → 0; silence-overlap 0; out-of-segment 0**; segment
+    counts and criterion 3 byte-identical. credits/coast defer (1 junk + 0 speech rows);
+    alignment applies on their next natural re-transcribe (word_align defaults True).
+  - **Acceptance harness v2**: per-class scoring (spoken/visual-object/visual-scene/
+    action/lyric/negative); 4 pre-registered far-concept negative controls scored
+    against a data-calibrated per-space floor (loosest true-hit distance; printed);
+    uncalibrated space → loud SKIP, never a vacuous pass; `expected_fail` (Q9/Q10) =
+    XFAIL with strict-XPASS, so exit code means REGRESSION (steady state: 12 pass /
+    2 xfail / exit 0). Floors this corpus: text .3095, image .8777 (nearest negative
+    .9263 — thin margin, documented). Near-miss negatives are future work.
+  - **Adversarial review (house convention)**: 2 independent reviewers (correctness;
+    hostile-media/ops) → 18 findings → 6 majors CONFIRMED+FIXED (hyphen char maps to
+    CTC blank killing alignment per segment; negative check only ever tested the
+    image space — RRF tie keeps image at top-1 — now all top-3 scored per-space;
+    vacuous negative pass on uncalibrated space; dependency/download preflight ran
+    AFTER the full whisper pass; README's sync line omitted --extra align and would
+    prune the feature's dep; no slice-length cap — wav2vec2 memory ~22 MB/s of audio,
+    VAD-restored segments can span gated-out gaps → 30 s cap) + 7 minors fixed, 5
+    verified-sound. First unit tests added (tests/test_word_align.py — tokenizer/WAV
+    guards). All fixes re-verified by execution.
 - **Ops: ingest has no `running` job state** (it only writes done/failed at stage end),
   so a re-run over a previously failed ingest shows the stale `failed` row while ffmpeg
   is actively encoding — read the process, not the row. The per-source staging cache

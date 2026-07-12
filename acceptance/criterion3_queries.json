@@ -1,35 +1,224 @@
 {
-  "_doc": "Criterion 3 pre-registered queries. correct = any top-3 result whose CUT RANGE has IoU >= 0.5 with any gt_range OR start within +/-0.5s of it; for containment_ok anchors (deliberately broad ground truth like 'the speaker at the podium'), a cut range fully inside the gt range also counts. Ground truth labeled by DIRECT media inspection (frames viewed, validated transcript sentence bounds), never by querying the index. All occurrences of a phrase are labeled. Queries for credits/coast are finalized after media download, BEFORE any search against their index.",
-  "queries": [
-    {"id": "Q1", "video": "jobs2005", "mode": "spoken", "query": "stay hungry stay foolish",
-     "gt_ranges": [[849.4, 852.3], [856.5, 858.4], [867.7, 870.1]],
-     "gt_basis": "transcript sentence bounds of all three utterances"},
-    {"id": "Q2", "video": "jobs2005", "mode": "spoken", "query": "you can't connect the dots looking forward",
-     "gt_ranges": [[297.1, 302.0], [306.6, 309.5]],
-     "gt_basis": "both sentences stating this idea (297.12 and 306.60)"},
-    {"id": "Q3", "video": "jobs2005", "mode": "spoken", "query": "diagnosed with cancer",
-     "gt_ranges": [[614.2, 616.2]],
-     "gt_basis": "sentence 'I was diagnosed with cancer.' at [614.20, 616.22]"},
-    {"id": "Q4", "video": "jobs2005", "mode": "visual", "query": "Stanford university logo with a tree",
-     "gt_ranges": [[890.5, 903.3]],
-     "gt_basis": "frames viewed: black at f26649 (888.3s), logo at f26723 (890.8s) through end"},
-    {"id": "Q5", "video": "jobs2005", "mode": "visual", "query": "man in black academic robes speaking at a wooden podium",
-     "gt_ranges": [[30.0, 890.0]], "containment_ok": true,
-     "gt_basis": "frames viewed: podium shot spans effectively the whole speech; any shot inside counts"},
-    {"id": "Q6", "video": "coast", "mode": "visual", "query": "waves crashing on rocks",
-     "gt_ranges": [[63.1, 115.2], [225.9, 278.0], [476.0, 502.0], [592.8, 618.9]], "containment_ok": true,
-     "gt_basis": "full census: all 31 shot rep frames viewed (Claude vision, 2026-07-12); matches = shots 2-3, 12-13, 23, 29 (top-down surf striking brown rock, heavy whitewater); bounds = PySceneDetect shot boundaries. Excluded borderline: shots 8/11 (foam patches, rock only at corner), 20-22 (rocky islet, distant edge break)"},
-    {"id": "Q7", "video": "coast", "mode": "visual", "query": "aerial view of a forested headland with houses, beaches on both sides",
-     "gt_ranges": [[306.8, 321.7], [502.0, 517.0], [552.1, 567.1]], "containment_ok": true,
-     "gt_basis": "full census as Q6; draft query 'aerial drone shot of the coastline' was true for ~37% of timeline (unscorable) -> narrowed to the recurring twin-beach headland location: shots 16, 24, 26. Similar-but-excluded: single-beach vistas (shots 1, 6-7, 15, 17-19, 25, 30), dusk surf lines (5, 10, 28)"},
-    {"id": "Q8", "video": "credits", "mode": "visual", "query": "person filming with a handheld camcorder",
-     "gt_ranges": [[16.984, 17.885], [359.092, 359.96], [503.636, 504.971]], "containment_ok": true,
-     "gt_basis": "authored blind from 12-frame sample BEFORE captions/search; candidates from caption-grep (camera/filming/record) + blind-sample positives, each verified by frame view: shots 3 (camcorder to eye, marble wall), 99 (camcorder raised overhead), 147 (VX to eye, record light). Excluded: shot 30 (smartphone, not camcorder), shot 150 (camera-to-eye in group curb shot - still-vs-video ambiguous at rep-frame resolution). Caption-grep recall was 1/3 on known positives (shots 3, 69 missed) -> visual verification mandatory; 6-shot negative audit found the shot-150 ambiguity, else clean"},
-    {"id": "Q9", "video": "credits", "mode": "visual", "query": "skateboarder riding up a wall",
-     "gt_ranges": [[248.115, 252.552]], "containment_ok": true,
-     "gt_basis": "authored blind as Q8 (wallride seen at shot 69 in blind sample); all caption-grep 'wall' candidates verified NOT wallrides (107 ledge-on-wall-top, 110 flat near wall, 138 stepping over, 223/234 brick-bank carve, 94/96 scenery); single occurrence confirmed"},
-    {"id": "Q10", "video": "credits", "mode": "lyrics", "query": "tell those men with horses for hearts",
-     "gt_ranges": [[74.26, 79.6]],
-     "gt_basis": "lyric row [74.26,79.6] cross-verified by INDEPENDENT ASR (whisper base int8, cold pass on 73.5-80.5s audio slice) -> 'tell us men with horses for hearts' at same offset; two models agree on words+timing. EXPECTED FAIL under current search surface: kind='lyrics' is advisory-only (not embedded) by round-1 design - this query is the pre-registered, measured driver for the round-2 'embed lyrics' decision. Retrieval via the exhaustive contract works today: vindex list --video credits --kind lyrics --range 74:80"}
-  ]
+ "_doc": "Criterion 3 pre-registered queries. correct = any top-3 result whose CUT RANGE has IoU >= 0.5 with any gt_range OR start within +/-0.5s of it; for containment_ok anchors (deliberately broad ground truth like 'the speaker at the podium'), a cut range fully inside the gt range also counts. Ground truth labeled by DIRECT media inspection (frames viewed, validated transcript sentence bounds), never by querying the index. All occurrences of a phrase are labeled. Queries for credits/coast are finalized after media download, BEFORE any search against their index. NEGATIVE CONTROLS (gt_ranges == []): nothing in the corpus matches; pass = top-1 scores strictly worse in every space than the loosest true hit among passing positives (data-calibrated floor, printed by the scorer). Authored 2026-07-12 with knowledge of corpus content (required to assert absence) but before ever running them. expected_fail marks pre-registered roadmap gaps: their failure is XFAIL (exit 0); an unexpected pass is strict-XPASS (exit 1, update the spec). Negative-difficulty note: the four negatives are far-concept controls; near-miss negatives (e.g. 'waves on a sandy beach with no rocks') are future work and this suite does NOT yet measure that harder class.",
+ "queries": [
+  {
+   "id": "Q1",
+   "video": "jobs2005",
+   "mode": "spoken",
+   "query": "stay hungry stay foolish",
+   "gt_ranges": [
+    [
+     849.4,
+     852.3
+    ],
+    [
+     856.5,
+     858.4
+    ],
+    [
+     867.7,
+     870.1
+    ]
+   ],
+   "gt_basis": "transcript sentence bounds of all three utterances",
+   "class": "spoken"
+  },
+  {
+   "id": "Q2",
+   "video": "jobs2005",
+   "mode": "spoken",
+   "query": "you can't connect the dots looking forward",
+   "gt_ranges": [
+    [
+     297.1,
+     302.0
+    ],
+    [
+     306.6,
+     309.5
+    ]
+   ],
+   "gt_basis": "both sentences stating this idea (297.12 and 306.60)",
+   "class": "spoken"
+  },
+  {
+   "id": "Q3",
+   "video": "jobs2005",
+   "mode": "spoken",
+   "query": "diagnosed with cancer",
+   "gt_ranges": [
+    [
+     614.2,
+     616.2
+    ]
+   ],
+   "gt_basis": "sentence 'I was diagnosed with cancer.' at [614.20, 616.22]",
+   "class": "spoken"
+  },
+  {
+   "id": "Q4",
+   "video": "jobs2005",
+   "mode": "visual",
+   "query": "Stanford university logo with a tree",
+   "gt_ranges": [
+    [
+     890.5,
+     903.3
+    ]
+   ],
+   "gt_basis": "frames viewed: black at f26649 (888.3s), logo at f26723 (890.8s) through end",
+   "class": "visual-object"
+  },
+  {
+   "id": "Q5",
+   "video": "jobs2005",
+   "mode": "visual",
+   "query": "man in black academic robes speaking at a wooden podium",
+   "gt_ranges": [
+    [
+     30.0,
+     890.0
+    ]
+   ],
+   "containment_ok": true,
+   "gt_basis": "frames viewed: podium shot spans effectively the whole speech; any shot inside counts",
+   "class": "visual-scene"
+  },
+  {
+   "id": "Q6",
+   "video": "coast",
+   "mode": "visual",
+   "query": "waves crashing on rocks",
+   "gt_ranges": [
+    [
+     63.1,
+     115.2
+    ],
+    [
+     225.9,
+     278.0
+    ],
+    [
+     476.0,
+     502.0
+    ],
+    [
+     592.8,
+     618.9
+    ]
+   ],
+   "containment_ok": true,
+   "gt_basis": "full census: all 31 shot rep frames viewed (Claude vision, 2026-07-12); matches = shots 2-3, 12-13, 23, 29 (top-down surf striking brown rock, heavy whitewater); bounds = PySceneDetect shot boundaries. Excluded borderline: shots 8/11 (foam patches, rock only at corner), 20-22 (rocky islet, distant edge break)",
+   "class": "visual-scene"
+  },
+  {
+   "id": "Q7",
+   "video": "coast",
+   "mode": "visual",
+   "query": "aerial view of a forested headland with houses, beaches on both sides",
+   "gt_ranges": [
+    [
+     306.8,
+     321.7
+    ],
+    [
+     502.0,
+     517.0
+    ],
+    [
+     552.1,
+     567.1
+    ]
+   ],
+   "containment_ok": true,
+   "gt_basis": "full census as Q6; draft query 'aerial drone shot of the coastline' was true for ~37% of timeline (unscorable) -> narrowed to the recurring twin-beach headland location: shots 16, 24, 26. Similar-but-excluded: single-beach vistas (shots 1, 6-7, 15, 17-19, 25, 30), dusk surf lines (5, 10, 28)",
+   "class": "visual-scene"
+  },
+  {
+   "id": "Q8",
+   "video": "credits",
+   "mode": "visual",
+   "query": "person filming with a handheld camcorder",
+   "gt_ranges": [
+    [
+     16.984,
+     17.885
+    ],
+    [
+     359.092,
+     359.96
+    ],
+    [
+     503.636,
+     504.971
+    ]
+   ],
+   "containment_ok": true,
+   "gt_basis": "authored blind from 12-frame sample BEFORE captions/search; candidates from caption-grep (camera/filming/record) + blind-sample positives, each verified by frame view: shots 3 (camcorder to eye, marble wall), 99 (camcorder raised overhead), 147 (VX to eye, record light). Excluded: shot 30 (smartphone, not camcorder), shot 150 (camera-to-eye in group curb shot - still-vs-video ambiguous at rep-frame resolution). Caption-grep recall was 1/3 on known positives (shots 3, 69 missed) -> visual verification mandatory; 6-shot negative audit found the shot-150 ambiguity, else clean",
+   "class": "visual-object"
+  },
+  {
+   "id": "Q9",
+   "video": "credits",
+   "mode": "visual",
+   "query": "skateboarder riding up a wall",
+   "gt_ranges": [
+    [
+     248.115,
+     252.552
+    ]
+   ],
+   "containment_ok": true,
+   "gt_basis": "authored blind as Q8 (wallride seen at shot 69 in blind sample); all caption-grep 'wall' candidates verified NOT wallrides (107 ledge-on-wall-top, 110 flat near wall, 138 stepping over, 223/234 brick-bank carve, 94/96 scenery); single occurrence confirmed",
+   "class": "action",
+   "expected_fail": true
+  },
+  {
+   "id": "Q10",
+   "video": "credits",
+   "mode": "lyrics",
+   "query": "tell those men with horses for hearts",
+   "gt_ranges": [
+    [
+     74.26,
+     79.6
+    ]
+   ],
+   "gt_basis": "lyric row [74.26,79.6] cross-verified by INDEPENDENT ASR (whisper base int8, cold pass on 73.5-80.5s audio slice) -> 'tell us men with horses for hearts' at same offset; two models agree on words+timing. EXPECTED FAIL under current search surface: kind='lyrics' is advisory-only (not embedded) by round-1 design - this query is the pre-registered, measured driver for the round-2 'embed lyrics' decision. Retrieval via the exhaustive contract works today: vindex list --video credits --kind lyrics --range 74:80",
+   "class": "lyric",
+   "expected_fail": true
+  },
+  {
+   "id": "N1",
+   "video": "jobs2005",
+   "mode": "visual",
+   "class": "negative",
+   "query": "a dog catching a frisbee in a park",
+   "gt_ranges": []
+  },
+  {
+   "id": "N2",
+   "video": "coast",
+   "mode": "visual",
+   "class": "negative",
+   "query": "people dancing at an indoor wedding party",
+   "gt_ranges": []
+  },
+  {
+   "id": "N3",
+   "video": "credits",
+   "mode": "visual",
+   "class": "negative",
+   "query": "underwater coral reef with tropical fish",
+   "gt_ranges": []
+  },
+  {
+   "id": "N4",
+   "video": "jobs2005",
+   "mode": "spoken",
+   "class": "negative",
+   "query": "the recipe for chocolate cake",
+   "gt_ranges": []
+  }
+ ]
 }

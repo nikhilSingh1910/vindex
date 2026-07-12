@@ -68,6 +68,9 @@ class Config:
     # A whisper segment whose fraction-overlapped-by-music is >= this is excluded from
     # kind='speech' and has_speech (it is sung content, covered by the lyrics pass).
     music_overlap_exclude_frac: float = 0.5
+    # wav2vec2 CTC forced alignment refines whisper word t0/t1 (criterion-4 fix; English
+    # only, per-segment fallback). Requires the 'align' extra; FAILS LOUDLY without it.
+    word_align: bool = True
 
     # --- shots ---
     # Scenes shorter than this merge into their neighbor (phantom micro-shot guard).

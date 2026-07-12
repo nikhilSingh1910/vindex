@@ -140,6 +140,13 @@ def run(video_id: str, cfg: Config, conn) -> dict:
     if cfg.music_gate:
         music_regions, noise_regions, gate_prov = _segment_music(wav)
 
+    # Preflight the word-alignment model BEFORE the expensive whisper pass: a missing
+    # extra or a failed first-run download must cost seconds, not a full transcription
+    # (same pattern as the music-gate preflight above).
+    if cfg.word_align:
+        from . import word_align
+        word_align.preflight()
+
     model = _load_model(cfg)
     segments_iter, info = model.transcribe(
         str(wav),
@@ -188,6 +195,18 @@ def run(video_id: str, cfg: Config, conn) -> dict:
             },
         ))
         speech_regions.append((float(seg.start), float(seg.end)))
+
+    # --- word alignment: refine word t0/t1 in place against the audio (segment bounds,
+    # text, and everything derived from them are untouched; per-segment fallback) --------
+    align_stats: dict = {}
+    if cfg.word_align:
+        from . import word_align
+        if speech_rows and info.language == "en":
+            align_stats = word_align.align_speech_words(wav, speech_rows)
+        else:
+            align_stats = {"word_align_skipped": (
+                "no speech rows" if not speech_rows else f"language={info.language}")}
+        word_align.release()
 
     # --- lyrics: whisper over music regions only, VAD OFF (Silero is bidirectionally
     # unreliable on sung vocals — lyrics must not depend on it firing) -------------------
@@ -293,6 +312,7 @@ def run(video_id: str, cfg: Config, conn) -> dict:
         "lyrics_segments": len(lyric_rows),
         "excluded_as_music": excluded_as_music,
         "language": info.language,
+        **align_stats,
     }
 
 

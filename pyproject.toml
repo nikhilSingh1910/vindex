@@ -27,6 +27,9 @@ frames = [         # stage 3
 shots = [          # stage 2 (was undeclared; only survived past syncs by accident)
     "scenedetect>=0.6",
 ]
+align = [          # stage 4 word-timestamp refinement (wav2vec2 CTC forced alignment)
+    "torchaudio>=2.1",
+]
 music = [          # stage 4 music/speech segmenter
     "inaSpeechSegmenter>=0.7.7",
     # 0.8.0's runtime imports, undeclared upstream (validated on macOS arm64 py3.12):
