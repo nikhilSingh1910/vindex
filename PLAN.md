@@ -572,6 +572,18 @@ then re-transcribed + re-embedded corpus-wide with the music gate on. Third-sess
   visual-scene / action / lyric / negative-control), TiViBench-style hierarchical
   taxonomy — Q9 just proved "action" is a distinct capability class that aggregate
   pass rates would hide.
+- **Gemini Embedding 2 study (2026-07-12)**: Google's natively-multimodal embedding
+  API (text/image/audio/video/PDF in ONE 3072-dim space, MRL truncation to 128).
+  Unusable directly (paid API violates constraint #1; hosted model-version churn
+  would fracture a pinned vector space — our model_name/dim row scoping exists
+  precisely because embeddings are only comparable within one frozen model). Concepts
+  kept: (a) the unified-multimodal-space end state — dissolves RRF and the Q9 action
+  gap (text→video-native embedding); local candidates LanguageBind/InternVideo2 when
+  mature (ImageBind is CC-BY-NC — license trap); adoption is schema-free (one more
+  model_name/dim in the BLOB column). (b) MRL coarse-search + full-dim rerank as the
+  corpus-scale cost lever (nomic-embed v1.5 is a local Apache-2.0 MRL model) —
+  round 3. Verified during study: search.py already applies bge's asymmetric
+  BGE_QUERY_PREFIX at query time — no free win being missed.
 - **Ops: ingest has no `running` job state** (it only writes done/failed at stage end),
   so a re-run over a previously failed ingest shows the stale `failed` row while ffmpeg
   is actively encoding — read the process, not the row. The per-source staging cache
