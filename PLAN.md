@@ -487,6 +487,22 @@ then re-transcribed + re-embedded corpus-wide with the music gate on. Third-sess
     held (advisory lyrics only; nothing entered speech/search/has_speech), but **round-2
     item: the lyrics pass needs the hallucination guards the speech pass has** (and/or a
     min-duration floor on music regions before lyric transcription).
+- **Criterion 3 COMPLETE (2026-07-12): all 10 queries labeled, 8/10 pass; both failures
+  understood and roadmapped.** Q6-Q10 ground truth labeled by Claude visual inspection
+  (protocol recorded per-query in criterion3_queries.json `gt_basis`): coast = full
+  31-shot census; credits = blind-authored queries -> caption-grep recall aid -> per-
+  candidate frame verification + 6-shot negative audit (grep recall on known positives
+  was 1/3 — visual verification is mandatory, captions alone cannot label); Q10 lyric
+  cross-verified by independent ASR (whisper base agrees with large-v3 on words+offset).
+  Results: Q6 rank1 IoU .5; Q7 rank1 IoU .996; Q8 rank1 IoU .999 (a 0.9 s camcorder
+  shot); **Q9 FAIL — the action-query gap, now measured**: the single wallride (shot 69,
+  248.1-252.6) is indexed but neither space ranks it top-3 (SigLIP = per-frame
+  appearance; VLM caption didn't name the action) — pre-registered driver for the
+  temporal-grounding (lighthouse) / action-aware roadmap; **Q10 FAIL as designed** —
+  lyrics are advisory-only, the pre-registered driver for round-2 embed-lyrics (the
+  exhaustive `list` contract retrieves it today). **Criterion 7 closed**: the gate's only
+  excluded speech on credits was the 0.4 s hallucinated "God" (prob .35) — the precision
+  trade cost zero genuine speech on this corpus.
 - **Criterion 3 re-verified post-re-embed: 5/5 pass with identical ranks and IoUs** —
   also validates that the sentence-transformers 4.x→5.6.0 bump (forced by the dependency
   fix above) produces an equivalent bge text space. North-star query verified live on
