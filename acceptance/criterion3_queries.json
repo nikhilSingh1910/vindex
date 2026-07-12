@@ -1,0 +1,25 @@
+{
+  "_doc": "Criterion 3 pre-registered queries. correct = any top-3 result whose CUT RANGE has IoU >= 0.5 with any gt_range OR start within +/-0.5s of it; for containment_ok anchors (deliberately broad ground truth like 'the speaker at the podium'), a cut range fully inside the gt range also counts. Ground truth labeled by DIRECT media inspection (frames viewed, validated transcript sentence bounds), never by querying the index. All occurrences of a phrase are labeled. Queries for credits/coast are finalized after media download, BEFORE any search against their index.",
+  "queries": [
+    {"id": "Q1", "video": "jobs2005", "mode": "spoken", "query": "stay hungry stay foolish",
+     "gt_ranges": [[849.4, 852.3], [856.5, 858.4], [867.7, 870.1]],
+     "gt_basis": "transcript sentence bounds of all three utterances"},
+    {"id": "Q2", "video": "jobs2005", "mode": "spoken", "query": "you can't connect the dots looking forward",
+     "gt_ranges": [[297.1, 302.0], [306.6, 309.5]],
+     "gt_basis": "both sentences stating this idea (297.12 and 306.60)"},
+    {"id": "Q3", "video": "jobs2005", "mode": "spoken", "query": "diagnosed with cancer",
+     "gt_ranges": [[614.2, 616.2]],
+     "gt_basis": "sentence 'I was diagnosed with cancer.' at [614.20, 616.22]"},
+    {"id": "Q4", "video": "jobs2005", "mode": "visual", "query": "Stanford university logo with a tree",
+     "gt_ranges": [[890.5, 903.3]],
+     "gt_basis": "frames viewed: black at f26649 (888.3s), logo at f26723 (890.8s) through end"},
+    {"id": "Q5", "video": "jobs2005", "mode": "visual", "query": "man in black academic robes speaking at a wooden podium",
+     "gt_ranges": [[30.0, 890.0]], "containment_ok": true,
+     "gt_basis": "frames viewed: podium shot spans effectively the whole speech; any shot inside counts"},
+    {"id": "Q6", "video": "coast", "mode": "visual", "query": "TO FINALIZE after media inspection: waves crashing on rocks", "gt_ranges": null},
+    {"id": "Q7", "video": "coast", "mode": "visual", "query": "TO FINALIZE after media inspection: aerial drone shot of the coastline", "gt_ranges": null},
+    {"id": "Q8", "video": "credits", "mode": "visual", "query": "TO FINALIZE after media inspection", "gt_ranges": null},
+    {"id": "Q9", "video": "credits", "mode": "visual", "query": "TO FINALIZE after media inspection", "gt_ranges": null},
+    {"id": "Q10", "video": "credits", "mode": "lyrics/spoken", "query": "TO FINALIZE after media inspection (music-bed lyric or spoken line if any)", "gt_ranges": null}
+  ]
+}

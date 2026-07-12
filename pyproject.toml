@@ -1,0 +1,69 @@
+[project]
+name = "vindex"
+version = "0.1.0"
+description = "Video indexer producing a timestamp-anchored, cut-actionable index for AI editing agents"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "pydantic>=2.7",
+    "faster-whisper>=1.1.0",
+    "sqlite-vec>=0.1.6",
+    "numpy>=1.26",
+]
+
+[project.optional-dependencies]
+# Heavier / platform-specific stages, added as they come online.
+captions = []      # ollama client wired in stage 5
+embed = [          # stage 6
+    "transformers>=4.44",
+    "torch>=2.3",
+    "pillow>=10.0",
+    "sentence-transformers>=3.0",   # bge text space (was undeclared; uv sync pruned it)
+]
+frames = [         # stage 3
+    "opencv-python-headless>=4.9",
+    "imagehash>=4.3",
+    "torchvision>=0.18",
+]
+shots = [          # stage 2 (was undeclared; only survived past syncs by accident)
+    "scenedetect>=0.6",
+]
+music = [          # stage 4 music/speech segmenter
+    "inaSpeechSegmenter>=0.7.7",
+    # 0.8.0's runtime imports, undeclared upstream (validated on macOS arm64 py3.12):
+    "tensorflow>=2.16",
+    "scikit-image>=0.22",
+    "soundfile>=0.12",
+    # upstream declares onnxruntime-gpu (no macOS wheels); overridden below to Linux-only,
+    # with the CPU package (same `onnxruntime` import) standing in on the dev Mac.
+    "onnxruntime>=1.18; sys_platform == 'darwin'",
+]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.5",
+]
+
+[project.scripts]
+vindex = "vindex.cli:main"
+
+[tool.uv]
+# inaSpeechSegmenter hard-requires onnxruntime-gpu, which ships no macOS wheels; restrict
+# it to Linux (prod trajectory) — the darwin marker in the music extra supplies the CPU one.
+override-dependencies = ["onnxruntime-gpu; sys_platform == 'linux'"]
+# tensorflow 2.21 declares CUDA deps with no platform markers, which locks macOS into
+# uninstallable nvidia-* wheels; require the dev Mac and Linux prod so resolution only
+# accepts graphs installable on both.
+required-environments = [
+    "sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "sys_platform == 'linux'",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/vindex"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"

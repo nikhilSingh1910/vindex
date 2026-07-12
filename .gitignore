@@ -1,0 +1,17 @@
+# Index data: media, mezzanines, SQLite DB — never committed (regenerate via `vindex index`)
+vindex_data/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+
+# Local editor/agent state
+.claude/settings.local.json
+
+# Local one-off backups
+uv.lock.pre-music-backup
+
+# macOS
+.DS_Store
