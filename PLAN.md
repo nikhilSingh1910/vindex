@@ -655,6 +655,34 @@ then re-transcribed + re-embedded corpus-wide with the music gate on. Third-sess
     three per-space rank-1s (RRF tie at 1/61, admit-order tiebreak) — spoken hits now
     sit at fused rank 2 behind an irrelevant image rank-1. Round-3: per-space k,
     weighted fusion, or rank-2 admission.
+- **Fourth video + support-case reproduction (2026-07-13 evening)**: indexed
+  l9M-XYYQmiM ("Just How Hard Is It to Win the World Cup?", 8.8 min 1080p59.94,
+  Romanian commentary) to reproduce a user's 0-results report. Verdicts and facts:
+  - **0 results is always environmental**: KNN returns nearest-k regardless of
+    distance; a healthy scoped index cannot return 0 for any query. Same video, same
+    query here → 10 results, World Cup trophy at rank 1 in caption AND image spaces.
+  - **URL-ingest video_ids are machine-specific** (default id = sha256 of downloaded
+    bytes; YouTube serves different encodings per day/region) — support diagnosis and
+    re-run advice must include `--id`, since resume-skipping requires the id and a
+    fresh download may hash differently, orphaning prior work.
+  - **First non-English corpus item**: language guard worked (`word_align_skipped:
+    language=ro` in stage stats); bge-small-en degrades the text space for Romanian
+    windows — multilingual text encoder is now a measured need, not a hypothesis.
+  - **Fast-cut content scales costs**: 518 shots / 8.8 min (≈1 s/shot), 1017 keyframes
+    — caption is 518 VLM calls. One per-shot caption failure (truncated VLM JSON),
+    isolated exactly as designed (error persisted on the shot row, 517 succeeded).
+  - **VLM-resident swap growth on a tight disk trips the guard**: two watchdog trips
+    (760 MB, 1.35 GB free) during resident-qwen captioning. Fix that held for the full
+    1h50m pass: **OLLAMA_KEEP_ALIVE=0** — the runner exits after every request, memory
+    fragmentation resets, and swap DRAINED under load (probe: 6066→4862 MB over 20
+    min) at ~35% throughput cost. This is the documented low-disk captioning mode.
+  - **My atomic-WAV fix had an unexecuted path**: ffmpeg infers the muxer from the
+    output extension; `.wav.part` has none → exit 234 on the FIRST fresh video (the
+    corpus's WAVs were pre-fix cached, so review + re-embed never ran the new path).
+    Fixed with explicit `-f wav`, verified standalone (528.7 s full-duration extract).
+    Lesson reinforced: execution-verify the changed code path, not the cached one —
+    the fail-loud EmbedError + stage isolation contained the bug (caption's 1h50m of
+    work survived in its own stage).
 - **Ops: ingest has no `running` job state** (it only writes done/failed at stage end),
   so a re-run over a previously failed ingest shows the stale `failed` row while ffmpeg
   is actively encoding — read the process, not the row. The per-source staging cache
