@@ -694,6 +694,34 @@ then re-transcribed + re-embedded corpus-wide with the music gate on. Third-sess
   zsh does not word-split unquoted `$VAR` — the same `set -- $V` bug corrupted a
   benchmark AND minted a garbage duplicate video (mangled URL still downloaded;
   hash-id 4bcea24a9748, removed) in one night. Wrap loops in `sh -c` or use arrays.
+- **End-to-end creation benchmark (2026-07-14, overnight, timestamped per stage; full
+  --force re-index of the 8.8-min/518-shot video)**: ingest 18m30s (2.3x vs original
+  ~42m — the t4 encode win is real), shots 48s, frames 8m39s, transcribe 21m09s (par by
+  choice), caption 120m12s, embed 8m58s → **total 178 min vs ~193 original = 1.06-1.08x.
+  VERDICT: index CREATION is essentially unchanged; the optimization round transformed
+  ITERATION (re-embed 1 s, suite 5.9x), not first-index time**, which is ~80% whisper+VLM
+  that we deliberately protected from quality trades. Creation breakthroughs = roadmap
+  (host-vision captioner, MLX spike, GPU prod), not tuning.
+  - **Correction, measured same-content**: the "+30% resident VLM" scorecard claim was a
+    cross-video artifact (credits captions faster than worldcup's). Same video: resident
+    120m vs keep_alive=0 110m — resident ~9% SLOWER (generation dominates; per-request
+    reload is noise; 10 GB resident swap may cost a little). keep_alive is a disk-safety
+    dial, not a speed lever. Never benchmark across different content (bitten twice).
+  - **Whisper determinism is content-dependent**: same source bytes, re-encoded
+    mezzanine → 174 → 573 speech segments on noisy Romanian commentary (VAD instability
+    on marginal audio), while the clean English corpus reproduces exactly across many
+    re-runs. Segment-level stability cannot be assumed on hard audio.
+  - **Shot-228 caption failure is DETERMINISTIC** (same shot, same truncated-JSON
+    error, two independent runs) — a frame that reliably breaks qwen2.5vl:3b's JSON,
+    not flake. Candidate probe for a caption-robustness fixture set.
+  - **Stale-48k-WAV edge observed live** (was review-flagged as latent): --force
+    re-encoded the mezzanine but embed reused the cached audio_48k_mono.wav
+    (audio_reused: 53 across a re-ingest). Benign this time (identical source bytes);
+    fix queued: invalidate the WAV when media_hash changes.
+  - Frames stage 99.7% deterministic on identical input (3/1017 borderline
+    person-detector score flips). Ops: the harness reaps long background tasks
+    (three kills, independent of output volume) — long unattended runs need
+    nohup+disown full detachment with a log-file monitor.
 - **Speed levers round (2026-07-14, night) — three levers tried, two shipped, one
   rejected with receipts**:
   - **Incremental embed SHIPPED**: embed reuses unchanged work per space — attach-kinds
