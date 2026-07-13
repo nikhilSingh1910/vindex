@@ -92,6 +92,9 @@ vindex index "https://www.youtube.com/watch?v=l9M-XYYQmiM"
 # shot midpoint; near-duplicates deduped). Lower = more keyframes = higher embed
 # cost; caption cost is per-shot and does not change:
 vindex index my_video.mp4 --keyframe-interval 1.0
+# any float > 0 works: 0.5 = every 15th frame at 30 fps, 0.1 = every 3rd; values
+# below one frame's duration clamp to every-frame (floor = 1/fps seconds). Dense
+# settings multiply JPEG storage and SigLIP embed time roughly linearly.
 
 # 2. Search it (ranked top-k across image, text, and audio spaces)
 vindex search "trophy" --video 6a16fd9fd8aa
