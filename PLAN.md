@@ -716,7 +716,24 @@ then re-transcribed + re-embedded corpus-wide with the music gate on. Third-sess
     ~15 min), not the advertised 6-8x (a GPU number). All three Q1-Q3 phrases and 3/3
     "stay hungry" occurrences found — turbo is good, just not equal, and equal was the
     bar. Re-evaluate on GPU prod hardware where the speed prize is real.
-- **Ops: ingest has no `running` job state** (it only writes done/failed at stage end),
+- **davinci-resolve-mcp study (2026-07-14, from Nikhil)**: MIT, very active (v2.62.0),
+  requires Resolve STUDIO. Our closest sibling — its analysis substrate independently
+  converged on our stack (local whisper/OpenCLIP/CLAP/sentence-transformers, SQLite WAL,
+  resumable chunked jobs, no cloud) — and the third consumer path for the end goal.
+  Adopted into roadmap: (1) **MCP as the agent surface** — a thin vindex-mcp exposing
+  search/list/info likely REPLACES the round-2 FastAPI item (less code, the actual
+  audience, and resident-process model caches kill the measured 26 s cold query);
+  (2) **host-vision captioner backend** (their pending_host_vision_analysis pattern):
+  defer captions to the DRIVING agent's multimodal calls behind the existing Captioner
+  protocol — internally proven when Claude-vision labeled Q6-Q10 better and faster than
+  qwen2.5vl:3b; keeps Ollama for headless batch; (3) **human-provenance corrections
+  layer** (their field_changelog, human-edits-always-win) — extends advisory/provenance
+  to human-authoritative; (4) cheap deterministic facts: EBU R128 loudness, black-frame
+  and sync-pop detection via ffmpeg filters; (5) demo variant: vindex search →
+  resolve-mcp placing cuts on a real Resolve timeline (Studio-only; video-use remains
+  the fully-free flagship). Kept distinct: our acceptance harness, deterministic
+  mezzanine + frame contract, music gate, word alignment — they're the hands, we're
+  the memory.
   so a re-run over a previously failed ingest shows the stale `failed` row while ffmpeg
   is actively encoding — read the process, not the row. The per-source staging cache
   enables pre-downloading OUTSIDE the pipeline process (yt-dlp sees the complete file and
