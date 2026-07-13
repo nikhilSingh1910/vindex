@@ -51,34 +51,81 @@ idempotent per stage, and single-process by contract.
 
 ## Install
 
-Requires **Python 3.12** (the music extra's dependency set pins the upper bound) and
-two system tools: **ffmpeg** (all stages) and **[Ollama](https://ollama.com)** with
-`qwen2.5vl:3b` pulled (captions only — skippable with `--no-captions`).
+**1. Prerequisites**
 
 ```bash
-# as a user (no clone):
-pip install "vindex[all] @ git+https://github.com/nikhilSingh1910/vindex.git"
+# Python 3.12 exactly (the music extra's dependency set pins the upper bound)
+python3.12 --version
 
-# or per-stage extras instead of [all]:
-#   embed, frames, shots, music, align, urls (YouTube ingest via yt-dlp)
+# ffmpeg + ffprobe (every stage's media I/O)
+brew install ffmpeg          # macOS        |  apt install ffmpeg   # Debian/Ubuntu
+
+# Ollama + the caption VLM (only the caption stage; skippable with --no-captions)
+brew install ollama          # or the installer from https://ollama.com
+ollama serve &               # low-disk machines: OLLAMA_KEEP_ALIVE=0 ollama serve &
+ollama pull qwen2.5vl:3b
 ```
 
-First runs download the models (SigLIP 2, whisper large-v3, CLAP, bge, wav2vec2 —
-roughly 10 GB cached under ~/.cache/huggingface).
+**2. Install the package**
+
+```bash
+python3.12 -m venv vindex-env && source vindex-env/bin/activate
+pip install "vindex[all] @ git+https://github.com/nikhilSingh1910/vindex.git"
+```
+
+`[all]` covers every stage. À la carte instead: `embed`, `frames`, `shots`, `music`,
+`align`, `urls` (YouTube ingest via yt-dlp).
+
+**3. Budget for first-run downloads**: the models (SigLIP 2, whisper large-v3, CLAP,
+bge, wav2vec2) total roughly 10 GB, cached once under `~/.cache/huggingface`.
+
+## Run
+
+```bash
+# 1. Index a video (file path or YouTube URL). Writes ./vindex_data/ in the
+#    CURRENT directory — run index and search from the same place.
+vindex index "https://www.youtube.com/watch?v=l9M-XYYQmiM"
+# ...pipeline runs: ingest -> shots -> frames -> transcribe -> caption -> embed
+# ends with:  indexed: 6a16fd9fd8aa        <- save this id
+
+# 2. Search it (ranked top-k across image, text, and audio spaces)
+vindex search "trophy" --video 6a16fd9fd8aa
+# {"kind": "caption", ..., "cut_t": [2.569, 5.222], "preview": "A close-up shot of
+#  various football trophies, including the FIFA World Cup Trophy..."}
+
+# restrict to one space:
+vindex search "crowd applauding and cheering" --video 6a16fd9fd8aa --kind audio_window
+
+# 3. Exhaustive reads (the contract for "all X" tasks — never use top-k for these)
+vindex list --video 6a16fd9fd8aa --kind shot
+vindex list --video 6a16fd9fd8aa --kind speech --range 60:120
+
+# 4. Video identity / metadata
+vindex info --video 6a16fd9fd8aa
+```
+
+Useful to know:
+- **Re-runs resume.** The pipeline is stage-resumable; pass the SAME `--id` back
+  (`vindex index <url> --id 6a16fd9fd8aa`) so completed stages are skipped — URL ingests
+  hash the downloaded bytes, so a fresh download may otherwise mint a new id.
+- **Captions fail soft.** An Ollama outage costs captions, not the run — the exit
+  message names any failed stage, and re-running the same command heals it.
+- **A healthy index never returns 0 results** (KNN returns nearest-k regardless of
+  match quality). If you see 0: you're in a different directory than where you indexed,
+  or the embed stage failed — check
+  `sqlite3 vindex_data/index.db "select stage,status from jobs;"`.
+- Indexing is deliberately slow-and-accurate (pinned single-threaded mezzanine encode,
+  large models; overnight-batch philosophy). An 8-minute 1080p video takes ~2-3 h on a
+  16 GB M4 Air, dominated by the per-shot VLM captions.
 
 ## Development
 
 ```bash
-uv sync --extra embed --extra frames --extra shots --extra music --extra align
-uv run vindex index <file-or-youtube-url> [--id NAME] [--no-captions]
-uv run vindex search "crowd applauding and cheering" --video jobs2005 --kind audio_window
-uv run vindex list --video credits --kind lyrics --range 70:85
-uv run python acceptance/run_criterion3.py   # pre-registered acceptance suite
+git clone https://github.com/nikhilSingh1910/vindex && cd vindex
+uv sync --extra embed --extra frames --extra shots --extra music --extra align --extra urls
+uv run pytest tests/ -q                       # unit tests
+uv run python acceptance/run_criterion3.py    # pre-registered acceptance suite
 ```
-
-Captions need a local [Ollama](https://ollama.com) with `qwen2.5vl:3b` pulled.
-Low-disk machines: run Ollama with `OLLAMA_KEEP_ALIVE=0` so the VLM unloads between
-caption requests (~35% slower, flat memory ceiling — measured on a 16 GB M4 Air).
 
 ---
 
