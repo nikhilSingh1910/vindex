@@ -127,7 +127,11 @@ def _require_stored_space(conn, model: str, kinds: tuple[str, ...],
     if stored and model not in stored:
         raise RuntimeError(
             f"query encoder {model!r} does not match stored embeddings "
-            f"{sorted(stored)} for kinds {kinds}; re-run embed or fix the model environment")
+            f"{sorted(stored)} for kinds {kinds}. Fix the model environment, or force "
+            f"this space to rebuild under the current model by clearing it first "
+            f"(embed reuses a fully-embedded space and will NOT silently re-encode): "
+            f"UPDATE segments SET embedding=NULL WHERE kind IN {kinds!r}; then re-run "
+            f"indexing")
 
 
 def search(

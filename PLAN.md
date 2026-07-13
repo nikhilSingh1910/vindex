@@ -683,6 +683,39 @@ then re-transcribed + re-embedded corpus-wide with the music gate on. Third-sess
     Lesson reinforced: execution-verify the changed code path, not the cached one —
     the fail-loud EmbedError + stage isolation contained the bug (caption's 1h50m of
     work survived in its own stage).
+- **Speed levers round (2026-07-14, night) — three levers tried, two shipped, one
+  rejected with receipts**:
+  - **Incremental embed SHIPPED**: embed reuses unchanged work per space — attach-kinds
+    (frame/caption) re-embed only NULL/stale-model rows (upstream re-runs mint new rows
+    with NULL embeddings, so the cascade stays naturally correct); embed-created kinds
+    (speech_window/audio_window) reuse only on exact recomputation match (bounds, text,
+    source_speech_ids, win_s) else full-kind rebuild. **Corpus re-embed: ~50 min → 1-2 s**
+    (all-reuse); partial path verified (5 NULLed rows → exactly 5 re-embedded). No silent
+    model upgrades: a fully-embedded space is reused even when a newer SIGLIP candidate
+    is loadable — rebuild lever = NULL the embeddings (search's mismatch error now says
+    exactly that). Adversarial review (2 lenses, both executed reproductions): 3 real
+    stale-truth bugs fixed pre-ship — reused windows keeping DANGLING source_speech_ids
+    after a re-transcribe (would silently degrade sentence-exact cuts to whole-window
+    containers via the standard --force path; both reviewers found it independently);
+    stale windows surviving speech-vanished+captions-empty; single-window win_s change
+    reusing an old-crop embedding. Crash-window convergence, mixed-model healing, and
+    the zero-model/zero-network fast path all reviewer-verified. unembedded_ids uses IS
+    NOT (SQL NULL trap). Known coarseness: NULLing one window row rebuilds that whole
+    kind (replace-owned); roadmap: per-stage re-run CLI lever, stale-48k-WAV-on-reingest.
+  - **Encode threads SHIPPED (honest numbers)**: encode_threads default 1 → 4, recorded
+    per videos row as PLAN always sanctioned. Fixed-N determinism VERIFIED (two t=4
+    encodes hash-identical; t=1 hash stable across days). Measured scaling on M4 Air
+    preset-slow is SUBLINEAR: t4 = 1.6x, t8 = 2.3x (not the naive 3-4x) — set higher on
+    bigger boxes via config. First benchmark run was 4x wrong from CPU contention with a
+    concurrent whisper job: benchmark on an idle machine or measure garbage.
+  - **large-v3-turbo REJECTED** (pre-registered rule: adopt only if measured-equal):
+    WER 2.54% vs our verified large-v3 reference (58/2285 words), and — decisive —
+    segmentation coarsens 330 → 193 segments on identical audio, which would degrade
+    the sentence-aligned cut_range refinement (criterion 3's IoU 0.98-1.0 spoken cuts
+    live on segments ≈ sentences). Speed prize on CPU int8 was only ~2.1x (417 s vs
+    ~15 min), not the advertised 6-8x (a GPU number). All three Q1-Q3 phrases and 3/3
+    "stay hungry" occurrences found — turbo is good, just not equal, and equal was the
+    bar. Re-evaluate on GPU prod hardware where the speed prize is real.
 - **Ops: ingest has no `running` job state** (it only writes done/failed at stage end),
   so a re-run over a previously failed ingest shows the stale `failed` row while ffmpeg
   is actively encoding — read the process, not the row. The per-source staging cache

@@ -252,6 +252,23 @@ def build_windows(
     return windows
 
 
+def windows_match(existing, windows) -> bool:
+    """Stored speech_window rows are reusable only if bounds, text AND source ids all
+    match the recomputation. The ids matter: a transcribe re-run mints new speech row
+    ids while producing identical windows (whisper is deterministic on unchanged media)
+    — reusing then would keep payloads pointing at dead rows, silently degrading
+    _cut_target's sentence-exact cuts to whole-window containers (reviewed: HIGH)."""
+    return (
+        len(existing) == len(windows)
+        and all(
+            abs(e.t_start_s - w[0]) < 1e-6 and abs(e.t_end_s - w[1]) < 1e-6
+            and e.payload.get("text") == w[2]
+            and e.payload.get("source_speech_ids") == w[3]
+            for e, w in zip(existing, windows)
+        )
+    )
+
+
 def run(video_id: str, cfg: Config, conn) -> dict:
     video = storage.get_video(conn, video_id)
     if video is None:
@@ -265,107 +282,177 @@ def run(video_id: str, cfg: Config, conn) -> dict:
 
     span_s = video.frame_count * video.fps_den / video.fps_num
     n_audio = 0
+    audio_reused = 0
     wav48 = _ensure_audio48k(cfg, video_id, Path(video.media_path))
     if wav48 is not None:
-        from .word_align import _load_wav  # stdlib WAV reader; validates mono s16le rate
+        # Duration from the WAV header only — the skip check must not cost a full
+        # waveform materialization, let alone a CLAP load.
+        import wave
 
-        waveform = _load_wav(wav48, _CLAP_SR)[0].numpy()  # 1-D float32
+        with wave.open(str(wav48), "rb") as f:
+            wav_dur = f.getnframes() / f.getframerate()
         # Tile the timeline both streams cover: cut math is bound to the video clock,
         # and slices past the audio's end would embed nothing.
-        tile_span = min(span_s, waveform.shape[0] / _CLAP_SR)
+        tile_span = min(span_s, wav_dur)
         windows = audio_windows(tile_span, cfg.audio_window_s, cfg.audio_window_min_s)
-        rows = []
-        blobs: list[bytes] = []
-        if windows:
-            clap = _load_clap()
-            blobs = _embed_audio(clap, waveform, windows, cfg.audio_window_s)
-            for t0, t1 in windows:
-                fs = _frame_start(t0, fps, last_frame)
-                rows.append(Segment(
-                    video_id=video_id, kind="audio_window",
-                    t_start_s=t0, t_end_s=t1,
-                    frame_start=fs, frame_end=_frame_end(t1, fps, last_frame, fs, span_s),
-                    model_name=clap.name, dim=clap.dim,
-                    payload={"win_s": cfg.audio_window_s},
-                ))
-        # Unconditional replace: a zero-window outcome (e.g. an empty WAV) must clear
-        # any prior rows rather than leave them as stale truth (reviewed).
-        storage.replace_segments(conn, video_id, ("audio_window",), rows)
-        if rows:
-            inserted = storage.list_segments(conn, video_id, kind="audio_window")
-            for seg, blob in zip(inserted, blobs):
-                assert seg.id is not None
-                storage.set_embedding(conn, seg.id, blob, clap.name, clap.dim)
-            n_audio = len(rows)
-            del clap  # release before SigLIP loads
-        del waveform
+        existing = storage.list_segments(conn, video_id, kind="audio_window")
+        unchanged = (
+            len(existing) == len(windows)
+            and all(abs(e.t_start_s - w[0]) < 1e-6 and abs(e.t_end_s - w[1]) < 1e-6
+                    # win_s too: a single-window tiling can produce identical bounds
+                    # under a different crop cap (reviewed: config change must re-embed).
+                    and e.payload.get("win_s") == cfg.audio_window_s
+                    for e, w in zip(existing, windows))
+            and not storage.unembedded_ids(conn, video_id, "audio_window", AUDIO_MODEL)
+        )
+        if unchanged:
+            audio_reused = len(existing)  # same tiling, same model, fully embedded
+        else:
+            from .word_align import _load_wav  # stdlib reader; validates mono s16le rate
+
+            waveform = _load_wav(wav48, _CLAP_SR)[0].numpy()  # 1-D float32
+            rows = []
+            blobs: list[bytes] = []
+            if windows:
+                clap = _load_clap()
+                blobs = _embed_audio(clap, waveform, windows, cfg.audio_window_s)
+                for t0, t1 in windows:
+                    fs = _frame_start(t0, fps, last_frame)
+                    rows.append(Segment(
+                        video_id=video_id, kind="audio_window",
+                        t_start_s=t0, t_end_s=t1,
+                        frame_start=fs,
+                        frame_end=_frame_end(t1, fps, last_frame, fs, span_s),
+                        model_name=clap.name, dim=clap.dim,
+                        payload={"win_s": cfg.audio_window_s},
+                    ))
+            # Unconditional replace: a zero-window outcome (e.g. an empty WAV) must clear
+            # any prior rows rather than leave them as stale truth (reviewed).
+            storage.replace_segments(conn, video_id, ("audio_window",), rows)
+            if rows:
+                inserted = storage.list_segments(conn, video_id, kind="audio_window")
+                for seg, blob in zip(inserted, blobs):
+                    assert seg.id is not None
+                    storage.set_embedding(conn, seg.id, blob, clap.name, clap.dim)
+                n_audio = len(rows)
+                del clap  # release before SigLIP loads
+            del waveform
     else:
         # No audio stream: an existing audio space would be stale truth on re-run.
         storage.replace_segments(conn, video_id, ("audio_window",), [])
 
-    # --- images: every kept keyframe ---------------------------------------------------
+    # --- images: keyframes still needing an embedding ----------------------------------
+    # A frames-stage re-run replaces its rows (new ids, NULL embeddings), so "embedding
+    # IS NULL" is exactly the incremental work list. A fully-embedded space is reused —
+    # deliberately even when a NEWER SigLIP candidate is loadable: silent model upgrades
+    # would fracture the vector space (to force a rebuild, NULL the embeddings).
     frames = storage.list_segments(conn, video_id, kind="frame")
     n_images = 0
+    images_reused = 0
     siglip_name = None
     if frames:
-        sig = _load_siglip()
-        siglip_name = sig.name
-        # frame_path is workdir-relative (absolute in pre-fix DBs; join is a no-op then)
-        paths = [str(cfg.workdir / f.payload["frame_path"]) for f in frames]
-        blobs = _embed_images(sig, paths)
-        for seg, blob in zip(frames, blobs):
-            assert seg.id is not None
-            storage.set_embedding(conn, seg.id, blob, sig.name, sig.dim)
-        n_images = len(frames)
-        del sig  # 16 GB machine: release before loading the text model
+        stored = storage.embedded_model_names(conn, ("frame",), video_id)
+        missing = set(storage.unembedded_ids(conn, video_id, "frame"))
+        if not missing and len(stored) == 1 and next(iter(stored)) in SIGLIP_CANDIDATES:
+            siglip_name = next(iter(stored))
+            images_reused = len(frames)
+        else:
+            sig = _load_siglip()
+            siglip_name = sig.name
+            # A partially-embedded space under a DIFFERENT model must rebuild wholesale
+            # — mixed models in one kind would silently halve search recall.
+            todo = frames if (stored and stored != {sig.name}) \
+                else [f for f in frames if f.id in missing]
+            # frame_path is workdir-relative (absolute in pre-fix DBs; join is a no-op)
+            paths = [str(cfg.workdir / f.payload["frame_path"]) for f in todo]
+            blobs = _embed_images(sig, paths)
+            for seg, blob in zip(todo, blobs):
+                assert seg.id is not None
+                storage.set_embedding(conn, seg.id, blob, sig.name, sig.dim)
+            n_images = len(todo)
+            images_reused = len(frames) - len(todo)
+            del sig  # 16 GB machine: release before loading the text model
 
     # --- text: transcript windows (+ captions when present) ----------------------------
     speech = storage.list_segments(conn, video_id, kind="speech")
     captions = storage.list_segments(conn, video_id, kind="caption")
     n_windows = n_captions = 0
+    windows_reused = captions_reused = 0
     text_dim = None
+    windows = build_windows(speech, cfg.window_target_s, cfg.window_max_s)
+    existing_sw = storage.list_segments(conn, video_id, kind="speech_window")
+    # Speech disappeared upstream: stale windows must not survive as truth — and this
+    # clear must not depend on captions existing either (reviewed: the
+    # speech-vanished + captions-empty state skipped the guarded block entirely).
+    if not windows and existing_sw:
+        storage.replace_segments(conn, video_id, ("speech_window",), [])
+        existing_sw = []
     if speech or captions:
-        tm = _load_text_model()
-        text_dim = int(tm.get_sentence_embedding_dimension())
+        # Reuse checks BEFORE the model loads: a fully-unchanged text space must cost
+        # only these queries.
+        sw_unchanged = (
+            windows_match(existing_sw, windows)
+            and not storage.unembedded_ids(conn, video_id, "speech_window", TEXT_MODEL)
+        )
+        # Empty-description captions are never embedded (unsearchable by design), so
+        # they must not hold the reuse check hostage. TEXT_MODEL staleness included:
+        # rows embedded under an older text model must re-embed, not pose as reused.
+        cap_missing = set(storage.unembedded_ids(conn, video_id, "caption", TEXT_MODEL))
+        cap_todo = [
+            (c, t) for c in captions
+            if c.id in cap_missing and (t := (c.payload.get("description") or "").strip())
+        ]
+        if sw_unchanged:
+            windows_reused = len(existing_sw)
+        captions_reused = sum(
+            1 for c in captions
+            if c.id not in cap_missing and (c.payload.get("description") or "").strip()
+        )
 
-        windows = build_windows(speech, cfg.window_target_s, cfg.window_max_s)
-        if windows:
-            rows = []
-            for t0, t1, text, ids in windows:
-                fs = _frame_start(t0, fps, last_frame)
-                rows.append(Segment(
-                    video_id=video_id, kind="speech_window",
-                    t_start_s=t0, t_end_s=t1,
-                    frame_start=fs, frame_end=_frame_end(t1, fps, last_frame, fs, span_s),
-                    model_name=TEXT_MODEL, dim=text_dim,
-                    payload={"text": text, "source_speech_ids": ids},
-                ))
-            blobs = _embed_texts(tm, [r.payload["text"] for r in rows])
-            storage.replace_segments(conn, video_id, ("speech_window",), rows)
-            # replace_segments strips embeddings (insert path has no embedding column);
-            # set them now against the freshly inserted rows, in insertion order.
-            inserted = storage.list_segments(conn, video_id, kind="speech_window")
-            for seg, blob in zip(inserted, blobs):
-                assert seg.id is not None
-                storage.set_embedding(conn, seg.id, blob, TEXT_MODEL, text_dim)
-            n_windows = len(rows)
+        if (windows and not sw_unchanged) or cap_todo:
+            tm = _load_text_model()
+            text_dim = int(tm.get_sentence_embedding_dimension())
 
-        if captions:
-            texts = [(c.payload.get("description") or "").strip() for c in captions]
-            keep = [(c, t) for c, t in zip(captions, texts) if t]
-            if keep:
-                blobs = _embed_texts(tm, [t for _, t in keep])
-                for (c, _), blob in zip(keep, blobs):
+            if windows and not sw_unchanged:
+                rows = []
+                for t0, t1, text, ids in windows:
+                    fs = _frame_start(t0, fps, last_frame)
+                    rows.append(Segment(
+                        video_id=video_id, kind="speech_window",
+                        t_start_s=t0, t_end_s=t1,
+                        frame_start=fs,
+                        frame_end=_frame_end(t1, fps, last_frame, fs, span_s),
+                        model_name=TEXT_MODEL, dim=text_dim,
+                        payload={"text": text, "source_speech_ids": ids},
+                    ))
+                blobs = _embed_texts(tm, [r.payload["text"] for r in rows])
+                storage.replace_segments(conn, video_id, ("speech_window",), rows)
+                # replace_segments strips embeddings (insert path has no embedding
+                # column); set them against the fresh rows, in insertion order.
+                inserted = storage.list_segments(conn, video_id, kind="speech_window")
+                for seg, blob in zip(inserted, blobs):
+                    assert seg.id is not None
+                    storage.set_embedding(conn, seg.id, blob, TEXT_MODEL, text_dim)
+                n_windows = len(rows)
+
+            if cap_todo:
+                blobs = _embed_texts(tm, [t for _, t in cap_todo])
+                for (c, _), blob in zip(cap_todo, blobs):
                     assert c.id is not None
                     storage.set_embedding(conn, c.id, blob, TEXT_MODEL, text_dim)
-                n_captions = len(keep)
+                n_captions = len(cap_todo)
 
     return {
         "image_embeddings": n_images,
+        "image_reused": images_reused,
         "image_model": siglip_name,
         "audio_windows": n_audio,
-        "audio_model": AUDIO_MODEL if n_audio else None,
+        "audio_reused": audio_reused,
+        "audio_model": AUDIO_MODEL if (n_audio or audio_reused) else None,
         "speech_windows": n_windows,
+        "speech_windows_reused": windows_reused,
         "caption_embeddings": n_captions,
-        "text_model": TEXT_MODEL if (n_windows or n_captions) else None,
+        "captions_reused": captions_reused,
+        "text_model": TEXT_MODEL if (n_windows or n_captions or windows_reused
+                                     or captions_reused) else None,
     }

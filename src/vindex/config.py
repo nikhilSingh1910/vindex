@@ -43,7 +43,10 @@ class Config:
     fps_tolerance: float = 0.002  # 0.2% relative; else hard-fail
     crf: int = 16
     preset: str = "slow"
-    encode_threads: int = 1  # pinned for byte-reproducibility (see PLAN facts #16)
+    # Fixed N, recorded on the videos row (PLAN sanctions any fixed N): same N -> same
+    # bytes, verified by execution (two t=4 encodes hash-identical). Measured on M4 Air,
+    # preset slow: t4 = 1.6x over t1, t8 = 2.3x — sublinear, set higher on bigger boxes.
+    encode_threads: int = 4
     audio_bitrate: str = "192k"
     # audio/video start_time must agree within one AAC frame (~21ms @ 48kHz) or we treat
     # it as an offset to persist and correct.

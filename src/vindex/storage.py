@@ -356,6 +356,23 @@ def embedded_model_names(
     return {row["model_name"] for row in conn.execute(sql, params).fetchall()}
 
 
+def unembedded_ids(
+    conn: sqlite3.Connection, video_id: str, kind: str, model_name: str | None = None
+) -> list[int]:
+    """Row ids of this kind still needing an embedding: NULL embedding, or — when
+    model_name is given — embedded under a different model (stale space). Upstream stage
+    re-runs replace their rows (new ids, NULL embeddings), so this is the exact
+    incremental-embed work list."""
+    sql = "SELECT id FROM segments WHERE video_id = ? AND kind = ? AND (embedding IS NULL"
+    params: list[Any] = [video_id, kind]
+    if model_name is not None:
+        # IS NOT, not !=: a NULL model_name must read as stale, not as SQL-unknown.
+        sql += " OR model_name IS NOT ?"
+        params.append(model_name)
+    sql += ")"
+    return [row["id"] for row in conn.execute(sql, params).fetchall()]
+
+
 def set_embedding(
     conn: sqlite3.Connection, segment_id: int, blob: bytes, model_name: str, dim: int
 ) -> None:
