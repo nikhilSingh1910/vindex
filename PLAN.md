@@ -683,6 +683,17 @@ then re-transcribed + re-embedded corpus-wide with the music gate on. Third-sess
     Lesson reinforced: execution-verify the changed code path, not the cached one —
     the fail-loud EmbedError + stage isolation contained the bug (caption's 1h50m of
     work survived in its own stage).
+- **Speed scorecard, measured (2026-07-14)**: warm multi-query search (acceptance
+  suite, 17 queries) **435 s → 73.6 s (5.9x)** via the search-lifetime encoder caches;
+  corpus re-embed (4 videos) **~50 min → 1 s** all-reuse; encode 1.6x at the new t4
+  default (2.3x available at t8); caption back to resident-VLM pace (~+30% vs the
+  low-disk keep_alive=0 era) now that disk headroom exists. Unchanged and honest: cold
+  single-CLI search is still ~36 s (per-process model loads — the MCP/daemon item), and
+  a FIRST index of a new video is dominated by whisper+captions, which none of these
+  levers touch (turbo was the candidate and was rejected on quality). Ops footnote:
+  zsh does not word-split unquoted `$VAR` — the same `set -- $V` bug corrupted a
+  benchmark AND minted a garbage duplicate video (mangled URL still downloaded;
+  hash-id 4bcea24a9748, removed) in one night. Wrap loops in `sh -c` or use arrays.
 - **Speed levers round (2026-07-14, night) — three levers tried, two shipped, one
   rejected with receipts**:
   - **Incremental embed SHIPPED**: embed reuses unchanged work per space — attach-kinds
@@ -733,7 +744,11 @@ then re-transcribed + re-embedded corpus-wide with the music gate on. Third-sess
   resolve-mcp placing cuts on a real Resolve timeline (Studio-only; video-use remains
   the fully-free flagship). Kept distinct: our acceptance harness, deterministic
   mezzanine + frame contract, music gate, word alignment — they're the hands, we're
-  the memory.
+  the memory. SOBER SIZING (on reflection, per Nikhil's push-back): moderately relevant
+  — two real takeaways (host-vision captioner; an MCP-surface nudge the ecosystem had
+  already given), the rest is validation/roadmap dust. Changes nothing about the build
+  queue (OTIO → video-use demo → action gap). Filed, two ideas stolen, moving on.
+- **Ops: ingest has no `running` job state** (it only writes done/failed at stage end),
   so a re-run over a previously failed ingest shows the stale `failed` row while ffmpeg
   is actively encoding — read the process, not the row. The per-source staging cache
   enables pre-downloading OUTSIDE the pipeline process (yt-dlp sees the complete file and
