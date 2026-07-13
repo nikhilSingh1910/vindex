@@ -49,7 +49,24 @@ idempotent per stage, and single-process by contract.
   contract: exact full scan for "all X" tasks. Destructive edits must be driven by
   `list`, never by top-k search.
 
-## Usage
+## Install
+
+Requires **Python 3.12** (the music extra's dependency set pins the upper bound) and
+two system tools: **ffmpeg** (all stages) and **[Ollama](https://ollama.com)** with
+`qwen2.5vl:3b` pulled (captions only — skippable with `--no-captions`).
+
+```bash
+# as a user (no clone):
+pip install "vindex[all] @ git+https://github.com/nikhilSingh1910/vindex.git"
+
+# or per-stage extras instead of [all]:
+#   embed, frames, shots, music, align, urls (YouTube ingest via yt-dlp)
+```
+
+First runs download the models (SigLIP 2, whisper large-v3, CLAP, bge, wav2vec2 —
+roughly 10 GB cached under ~/.cache/huggingface).
+
+## Development
 
 ```bash
 uv sync --extra embed --extra frames --extra shots --extra music --extra align
@@ -60,6 +77,8 @@ uv run python acceptance/run_criterion3.py   # pre-registered acceptance suite
 ```
 
 Captions need a local [Ollama](https://ollama.com) with `qwen2.5vl:3b` pulled.
+Low-disk machines: run Ollama with `OLLAMA_KEEP_ALIVE=0` so the VLM unloads between
+caption requests (~35% slower, flat memory ceiling — measured on a 16 GB M4 Air).
 
 ---
 
@@ -242,5 +261,9 @@ check the *weights* license, not just the repo badge.
    the ship decision.
 5. Run the failure paths. Kill the process mid-write. Feed it a 2005 video, an HDR
    master, a music bed, silence. Every one of those found something the happy path hid.
+
+## License
+
+Apache-2.0 — see [LICENSE](LICENSE).
 
 Built with [Claude Code](https://claude.com/claude-code).

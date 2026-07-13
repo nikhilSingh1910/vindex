@@ -2,13 +2,28 @@
 name = "vindex"
 version = "0.1.0"
 description = "Video indexer producing a timestamp-anchored, cut-actionable index for AI editing agents"
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 requires-python = ">=3.12,<3.13"
+keywords = ["video", "indexing", "search", "embeddings", "video-editing", "agents", "multimodal"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Video",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 dependencies = [
     "pydantic>=2.7",
     "faster-whisper>=1.1.0",
     "sqlite-vec>=0.1.6",
     "numpy>=1.26",
 ]
+
+[project.urls]
+Homepage = "https://github.com/nikhilSingh1910/vindex"
+Repository = "https://github.com/nikhilSingh1910/vindex"
 
 [project.optional-dependencies]
 # Heavier / platform-specific stages, added as they come online.
@@ -29,6 +44,14 @@ shots = [          # stage 2 (was undeclared; only survived past syncs by accide
 ]
 align = [          # stage 4 word-timestamp refinement (wav2vec2 CTC forced alignment)
     "torchaudio>=2.1",
+]
+urls = [           # YouTube/URL ingest (dev convenience; ingest shells out to yt-dlp)
+    "yt-dlp>=2024.10.0",
+]
+# Everything needed to run all six stages (ffmpeg and Ollama are system requirements,
+# not pip packages — see README).
+all = [
+    "vindex[embed,frames,shots,music,align,urls]",
 ]
 music = [          # stage 4 music/speech segmenter
     "inaSpeechSegmenter>=0.7.7",
