@@ -161,7 +161,10 @@ def _ensure_audio48k(cfg: Config, video_id: str, mezz: Path) -> Path | None:
         subprocess.run(
             ["ffmpeg", "-y", "-i", str(mezz), "-vn",
              "-af", "aresample=async=1:first_pts=0",  # same clock re-pin as the ASR WAV
-             "-ac", "1", "-ar", str(_CLAP_SR), "-c:a", "pcm_s16le", str(tmp)],
+             "-ac", "1", "-ar", str(_CLAP_SR), "-c:a", "pcm_s16le",
+             # -f is mandatory: ffmpeg infers the muxer from the extension, and the
+             # atomic-write temp name (.wav.part) has no recognized one (fired live).
+             "-f", "wav", str(tmp)],
             check=True, capture_output=True,
         )
     except subprocess.CalledProcessError as e:
