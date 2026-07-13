@@ -338,4 +338,6 @@ def run(video_id: str, cfg: Config, conn) -> dict:
         "near_duplicates_dropped": dropped_total,
         "shots_annotated": len(shot_motion),
         "orphaned_jpegs_pruned": pruned,
+        # Provenance: the cadence this run actually sampled at (CLI-overridable).
+        "keyframe_interval_s": cfg.keyframe_interval_s,
     }

@@ -88,6 +88,11 @@ vindex index "https://www.youtube.com/watch?v=l9M-XYYQmiM"
 # ...pipeline runs: ingest -> shots -> frames -> transcribe -> caption -> embed
 # ends with:  indexed: 6a16fd9fd8aa        <- save this id
 
+# denser visual sampling (default: one keyframe every 3.0 s within a shot, plus the
+# shot midpoint; near-duplicates deduped). Lower = more keyframes = higher embed
+# cost; caption cost is per-shot and does not change:
+vindex index my_video.mp4 --keyframe-interval 1.0
+
 # 2. Search it (ranked top-k across image, text, and audio spaces)
 vindex search "trophy" --video 6a16fd9fd8aa
 # {"kind": "caption", ..., "cut_t": [2.569, 5.222], "preview": "A close-up shot of

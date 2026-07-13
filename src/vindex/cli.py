@@ -23,6 +23,12 @@ def _cfg(args) -> Config:
 
 def cmd_index(args) -> int:
     cfg = _cfg(args)
+    if args.keyframe_interval is not None:
+        if args.keyframe_interval <= 0:
+            print(f"--keyframe-interval must be > 0, got {args.keyframe_interval}",
+                  file=sys.stderr)
+            return 2
+        cfg.keyframe_interval_s = args.keyframe_interval
     vid = pipeline.index(args.source, cfg, video_id=args.id, force=args.force,
                          no_captions=args.no_captions)
     from .jobs import get_status, Status
@@ -122,6 +128,11 @@ def main(argv: list[str] | None = None) -> int:
     pi.add_argument("--force", action="store_true", help="re-run all stages")
     pi.add_argument("--no-captions", action="store_true",
                     help="skip the VLM caption stage (slowest stage)")
+    pi.add_argument("--keyframe-interval", type=float, default=None, metavar="SECONDS",
+                    help="visual sampling cadence within a shot (default 3.0). Lower = "
+                         "denser keyframes; embed cost scales with kept frames, caption "
+                         "cost does not (it is per-shot). Applies when the frames stage "
+                         "runs — a resumed run with frames already done ignores it")
     pi.set_defaults(func=cmd_index)
 
     pl = sub.add_parser("list", help="exhaustive, ordered segment listing")
