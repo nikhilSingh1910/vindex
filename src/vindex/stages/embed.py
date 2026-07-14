@@ -63,6 +63,20 @@ class _Siglip:
     dim: int
 
 
+def _from_pretrained_resilient(cls, name: str, **kw):
+    """from_pretrained, falling back to the local cache when the Hub round-trip fails.
+    The revalidation request is ceremony for a fully-cached model, and its transport
+    can break independently of us (observed live: huggingface_hub's shared HTTP client
+    'has been closed' after the overlap threads' first-use, killing embed at SigLIP
+    load with all weights sitting on disk)."""
+    try:
+        return cls.from_pretrained(name, **kw)
+    except OSError:
+        raise  # genuinely-missing-from-cache reads as OSError; nothing to fall back to
+    except Exception:
+        return cls.from_pretrained(name, local_files_only=True, **kw)
+
+
 def _load_siglip() -> _Siglip:
     import torch
     from transformers import AutoModel, AutoProcessor
@@ -73,8 +87,9 @@ def _load_siglip() -> _Siglip:
         try:
             # dtype MUST be explicit: the checkpoint tensors are F32 (~3.5 GB) and a
             # default load would double the planned memory footprint (PLAN facts #4).
-            model = AutoModel.from_pretrained(name, dtype=torch.float16).to(device).eval()
-            processor = AutoProcessor.from_pretrained(name)
+            model = _from_pretrained_resilient(
+                AutoModel, name, dtype=torch.float16).to(device).eval()
+            processor = _from_pretrained_resilient(AutoProcessor, name)
             dim = int(model.config.vision_config.hidden_size)
             return _Siglip(model=model, processor=processor, name=name, device=device, dim=dim)
         except Exception as e:  # try the next candidate
@@ -118,8 +133,8 @@ def _load_clap() -> _Clap:
     from transformers import AutoProcessor, ClapModel
 
     device = _pick_device()
-    model = ClapModel.from_pretrained(AUDIO_MODEL).to(device).eval()
-    processor = AutoProcessor.from_pretrained(AUDIO_MODEL)
+    model = _from_pretrained_resilient(ClapModel, AUDIO_MODEL).to(device).eval()
+    processor = _from_pretrained_resilient(AutoProcessor, AUDIO_MODEL)
     return _Clap(model=model, processor=processor, name=AUDIO_MODEL, device=device,
                  dim=int(model.config.projection_dim))
 

@@ -753,6 +753,23 @@ then re-transcribed + re-embedded corpus-wide with the music gate on. Third-sess
   - Known accepted edges: Ctrl-C during overlap waits for in-flight stages (printed,
     resumable, no cancellation available); np-config changes rewrite ~3% of caption
     texts on re-runs (advisory by contract).
+  - **T1 PROVING RUN (same video, third full creation)**: total **~141 min vs 178
+    baseline (1.26x)** — ingest 13m45s (t8; 3.0x vs original stage), shots 41s,
+    frames 7m01s, transcribe 27m52s FULLY HIDDEN under caption (32% slower under CPU
+    contention, wall cost zero), caption 113m34s (np=2, ~6% net under contention),
+    embed 6m13s (batch 32, 1015 images: 1.4x). **Overlap memory receipt: min free
+    24%, peak swap 0 MB, watchdog silent through the whole concurrent window** — the
+    12-15 GB estimate was pessimistic (int8 whisper + 3B VLM + compression) →
+    overlap default flipped to True with this receipt; sequential remains one config
+    flag away for tight-disk machines. Acceptance suite unchanged (14/0/3). Shot-228
+    caption failure: third identical occurrence (deterministic frame). VAD on noisy
+    Romanian audio: third different segment count (174/573/474) — instability
+    confirmed content-dependent, clean corpus still exact. NEW BUG found+fixed by
+    the run: huggingface_hub's shared HTTP client can die after threaded first-use
+    ("client has been closed"), killing embed's SigLIP load with weights fully
+    cached — loaders now fall back to local_files_only (network revalidation is
+    ceremony for a cached model).
+  - Creation trajectory across the three same-video benchmarks: 193 → 178 → 141 min.
 - **Speed levers round (2026-07-14, night) — three levers tried, two shipped, one
   rejected with receipts**:
   - **Incremental embed SHIPPED**: embed reuses unchanged work per space — attach-kinds

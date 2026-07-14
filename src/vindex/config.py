@@ -128,11 +128,12 @@ class Config:
     caption_parallel: int = 2
     # Run transcribe (CPU-bound whisper) and caption (Ollama GPU/ANE) concurrently in
     # the ONE pipeline process, each on its own SQLite connection (WAL). The
-    # single-process-per-DB contract is unchanged. DEFAULT FALSE: the concurrent
-    # profile (whisper+TF+wav2vec2+VLM ~12-15 GB) is unmeasured on the 16 GB dev
-    # target with two documented swap-storm shutdowns — flip only with a measured
-    # receipt (PLAN), or per-run via `vindex index --overlap`.
-    overlap_transcribe_caption: bool = False
+    # single-process-per-DB contract is unchanged. Default True on the strength of a
+    # MEASURED receipt (PLAN 2026-07-14): full overlap window on the 16 GB dev box,
+    # min free memory 24%, peak swap 0 MB, watchdog silent; transcribe (+32% under
+    # CPU contention) hides entirely under caption. Requires disk headroom for swap
+    # growth — on a nearly-full disk prefer sequential (False / no --overlap).
+    overlap_transcribe_caption: bool = True
 
     hdr_transfers: frozenset[str] = field(default_factory=lambda: HDR_TRANSFERS)
     fps_whitelist: tuple[tuple[int, int], ...] = FPS_WHITELIST
