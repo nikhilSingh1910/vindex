@@ -29,6 +29,8 @@ def cmd_index(args) -> int:
                   file=sys.stderr)
             return 2
         cfg.keyframe_interval_s = args.keyframe_interval
+    if args.overlap:
+        cfg.overlap_transcribe_caption = True
     vid = pipeline.index(args.source, cfg, video_id=args.id, force=args.force,
                          no_captions=args.no_captions)
     from .jobs import get_status, Status
@@ -128,6 +130,9 @@ def main(argv: list[str] | None = None) -> int:
     pi.add_argument("--force", action="store_true", help="re-run all stages")
     pi.add_argument("--no-captions", action="store_true",
                     help="skip the VLM caption stage (slowest stage)")
+    pi.add_argument("--overlap", action="store_true",
+                    help="run transcribe and caption concurrently (CPU vs GPU stages; "
+                         "needs comfortable memory headroom — see config notes)")
     pi.add_argument("--keyframe-interval", type=float, default=None, metavar="SECONDS",
                     help="visual sampling cadence within a shot (default 3.0). Lower = "
                          "denser keyframes; embed cost scales with kept frames, caption "

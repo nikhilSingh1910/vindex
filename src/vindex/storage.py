@@ -73,6 +73,12 @@ def connect(db_path: str | Path, load_vec: bool = False) -> sqlite3.Connection:
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    # Timeout FIRST so even the journal_mode pragma below waits instead of failing if
+    # another connection holds the lock. Two stage connections may write concurrently
+    # (overlap mode: transcribe ∥ caption — different kinds, short write-first
+    # transactions, measured ~20 ms vs this 30 s budget). Without a busy timeout the
+    # second writer fails instantly with SQLITE_BUSY.
+    conn.execute("PRAGMA busy_timeout = 30000")
     conn.execute("PRAGMA journal_mode = WAL")
     if load_vec:
         import sqlite_vec  # imported lazily; only search/embed need it

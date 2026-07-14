@@ -66,23 +66,76 @@ def index(
         _cascade(conn, vid, "frames", force)
         _run_stage(conn, cfg, vid, "frames", lambda: frames.run(vid, cfg, conn), force)
 
-        # --- transcribe -------------------------------------------------------------
+        # --- transcribe + caption ------------------------------------------------------
+        # Caption failure semantics (both modes): advisory + individually skippable, so
+        # its failure must not cost the video its entire search surface — record FAILED,
+        # warn, continue to embed. The caption->embed cascade re-marks embed pending on
+        # the run where caption finally succeeds, so late captions still get embedded.
         _cascade(conn, vid, "transcribe", force)
-        _run_stage(conn, cfg, vid, "transcribe", lambda: transcribe.run(vid, cfg, conn), force)
-
-        # --- caption (advisory + individually skippable, so its failure must not cost
-        # the video its entire search surface: record FAILED, warn, continue to embed.
-        # The caption->embed cascade re-marks embed pending on the run where caption
-        # finally succeeds, so late captions still get embedded and searchable. ---------
-        caption_err: Exception | None = None
-        if not no_captions:
+        caption_wanted = not no_captions
+        if caption_wanted:
             _cascade(conn, vid, "caption", force)
-            try:
-                _run_stage(conn, cfg, vid, "caption", lambda: caption.run(vid, cfg, conn), force)
-            except Exception as e:
-                caption_err = e
-                print(f"[pipeline] WARNING: caption FAILED ({e}); continuing to embed — "
-                      f"re-run indexing once Ollama is healthy to caption + re-embed")
+        transcribe_needed = force or not jobs.is_done(conn, vid, "transcribe")
+        caption_needed = caption_wanted and (force or not jobs.is_done(conn, vid, "caption"))
+
+        caption_err: Exception | None = None
+        if cfg.overlap_transcribe_caption and transcribe_needed and caption_needed:
+            # Overlap: whisper is CPU-bound, the VLM is GPU/ANE-bound — run both now,
+            # in THIS process (single-process-per-DB contract unchanged), each stage on
+            # its own connection (WAL + busy_timeout; disjoint kinds, short commits).
+            # Cascades were already marked above, before either stage starts.
+            from concurrent.futures import ThreadPoolExecutor
+
+            def _stage_own_conn(stage_name: str, stage_fn) -> None:
+                tconn = storage.connect(cfg.db_path)
+                try:
+                    _run_stage(tconn, cfg, vid, stage_name,
+                               lambda: stage_fn(vid, cfg, tconn), force)
+                finally:
+                    tconn.close()
+
+            from concurrent.futures import FIRST_EXCEPTION, wait
+
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                t_fut = pool.submit(_stage_own_conn, "transcribe", transcribe.run)
+                c_fut = pool.submit(_stage_own_conn, "caption", caption.run)
+                # Surface the FIRST failure immediately (a transcribe preflight fails
+                # in seconds; silently waiting ~2 h of captioning to report it is
+                # hostile), but still let the other stage finish — its completed work
+                # is preserved in its own stage either way.
+                try:
+                    done, _ = wait([t_fut, c_fut], return_when=FIRST_EXCEPTION)
+                except KeyboardInterrupt:
+                    # True cancellation of in-flight stages isn't available; the pool
+                    # join on exit will wait for them. Say so instead of appearing hung.
+                    print("[pipeline] interrupt received — waiting for in-flight "
+                          "transcribe/caption to finish committing (resumable state); "
+                          "interrupt again to abandon the join")
+                    raise
+                for f in done:
+                    if f.exception() is not None:
+                        which = "transcribe" if f is t_fut else "caption"
+                        print(f"[pipeline] WARNING: {which} FAILED in overlap "
+                              f"({f.exception()}); letting the other stage finish")
+                try:
+                    c_fut.result()
+                except Exception as e:
+                    caption_err = e
+                    print(f"[pipeline] caption failure is non-fatal; continuing — "
+                          f"re-run indexing once Ollama is healthy to caption + re-embed")
+                # Transcribe failure fails the pipeline (after caption settles).
+                t_fut.result()
+        else:
+            _run_stage(conn, cfg, vid, "transcribe",
+                       lambda: transcribe.run(vid, cfg, conn), force)
+            if caption_wanted:
+                try:
+                    _run_stage(conn, cfg, vid, "caption",
+                               lambda: caption.run(vid, cfg, conn), force)
+                except Exception as e:
+                    caption_err = e
+                    print(f"[pipeline] WARNING: caption FAILED ({e}); continuing to embed "
+                          f"— re-run indexing once Ollama is healthy to caption + re-embed")
 
         # --- embed (last: consumes frames + transcript + captions) --------------------
         _run_stage(conn, cfg, vid, "embed", lambda: embed.run(vid, cfg, conn), force)

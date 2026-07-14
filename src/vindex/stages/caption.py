@@ -65,6 +65,14 @@ def _downscale_jpeg(path: str, max_side: int) -> bytes:
     return buf.getvalue()
 
 
+def _request_timeout(cfg: Config) -> float:
+    """Client budget scales with parallelism: on a server without matching
+    OLLAMA_NUM_PARALLEL slots the extra requests QUEUE, so one wall-clock budget must
+    cover up to caption_parallel generations (reviewed: un-scaled, queueing silently
+    halves the effective timeout and near-timeout shots start failing)."""
+    return cfg.caption_timeout_s * max(1, cfg.caption_parallel)
+
+
 def _ollama_caption(cfg: Config, image_jpeg: bytes) -> dict:
     """One captioning request. Raises on transport error, timeout, or unparseable output."""
     req = urllib.request.Request(
@@ -84,7 +92,7 @@ def _ollama_caption(cfg: Config, image_jpeg: bytes) -> dict:
         headers={"Content-Type": "application/json"},
     )
     try:
-        with urllib.request.urlopen(req, timeout=cfg.caption_timeout_s) as resp:
+        with urllib.request.urlopen(req, timeout=_request_timeout(cfg)) as resp:
             body = json.loads(resp.read())
     except urllib.error.HTTPError as e:
         # str(HTTPError) is just "HTTP Error 404: Not Found"; the body says WHICH problem
@@ -146,69 +154,108 @@ def run(video_id: str, cfg: Config, conn) -> dict:
         if f.payload.get("is_representative")
     }
 
+    def caption_shot(shot: Segment) -> tuple[Segment, dict | None, str]:
+        """One shot's caption attempt: (shot, data-or-None, error). Thread-safe: pure
+        request/parse work, no shared state."""
+        si = shot.payload.get("shot_index")
+        rep = rep_by_shot.get(si)
+        if rep is None:
+            return shot, None, "no representative frame"
+        last_err = ""
+        try:
+            # frame_path is workdir-relative (absolute rows from older DBs still work:
+            # joining an absolute path onto workdir yields the absolute path).
+            jpeg = _downscale_jpeg(
+                str(cfg.workdir / rep.payload["frame_path"]), cfg.caption_max_side_px)
+        except (OSError, ValueError) as e:
+            return shot, None, f"frame unreadable: {e}"[:300]  # fails THIS shot only
+        for _ in range(2):  # one retry, then record failure and move on
+            try:
+                return shot, _ollama_caption(cfg, jpeg), ""
+            except (urllib.error.URLError, TimeoutError, CaptionError, KeyError,
+                    ValueError, TypeError, http.client.HTTPException, OSError) as e:
+                last_err = str(e)[:300]
+        return shot, None, last_err
+
+    # Results keyed by shot id so rows assemble in SHOT order regardless of worker
+    # completion order (replace_segments output must not depend on scheduling).
+    outcome: dict[int, tuple[dict | None, str]] = {}
+    consecutive = 0
+    n_ok = 0
+    try:
+        workers = max(1, cfg.caption_parallel)
+        if workers == 1:
+            iterator = map(caption_shot, shots)
+        else:
+            from concurrent.futures import ThreadPoolExecutor
+
+            pool = ThreadPoolExecutor(max_workers=workers)
+            # map submits ALL futures up front but yields results in submission
+            # (= shot) order, with only `workers` threads executing; on breaker trip,
+            # cancel_futures drops every not-yet-started future (the tail).
+            iterator = pool.map(caption_shot, shots)
+        try:
+            for shot, data, err in iterator:
+                assert shot.id is not None
+                if data is None:
+                    outcome[shot.id] = (None, err)
+                    if err == "no representative frame":
+                        # A local data gap, not a sick VLM: recorded as a failure but
+                        # never counted toward the breaker (sequential-era semantics).
+                        continue
+                    consecutive += 1
+                    if consecutive >= cfg.caption_max_consecutive_failures:
+                        # Raising here, BEFORE replace_segments, preserves prior captions.
+                        raise CaptionError(
+                            f"aborting after {consecutive} consecutive failures "
+                            f"({n_ok} shots captioned first); last: {err}")
+                    continue
+                consecutive = 0
+                n_ok += 1
+                outcome[shot.id] = (data, "")
+        finally:
+            if workers > 1:
+                # wait=True: bounded at <= workers in-flight requests (~workers x
+                # timeout worst case, honoring the breaker's purpose), and REQUIRED —
+                # orphaned in-flight generations would otherwise queue behind the
+                # unload below, no-op it, and re-load the model with default
+                # keep_alive, holding ~4.6 GB into embed's SigLIP load (reviewed).
+                pool.shutdown(wait=True, cancel_futures=True)
+    finally:
+        _ollama_unload(cfg)
+
     rows: list[Segment] = []
     ok_shot_ids: list[int] = []
     failures: list[dict] = []
-    consecutive = 0
-    try:
-        for shot in shots:
-            si = shot.payload.get("shot_index")
-            rep = rep_by_shot.get(si)
-            if rep is None:
-                failures.append({"shot_id": shot.id, "shot_index": si,
-                                 "error": "no representative frame"})
-                continue
-            data = None
-            last_err = ""
-            try:
-                # frame_path is workdir-relative (absolute rows from older DBs still work:
-                # joining an absolute path onto workdir yields the absolute path).
-                jpeg = _downscale_jpeg(
-                    str(cfg.workdir / rep.payload["frame_path"]), cfg.caption_max_side_px)
-            except (OSError, ValueError) as e:
-                # missing/corrupt JPEG fails THIS shot, not the stage
-                jpeg = None
-                last_err = f"frame unreadable: {e}"[:300]
-            if jpeg is not None:
-                for _ in range(2):  # one retry, then record failure and move on
-                    try:
-                        data = _ollama_caption(cfg, jpeg)
-                        break
-                    except (urllib.error.URLError, TimeoutError, CaptionError, KeyError,
-                            ValueError, TypeError, http.client.HTTPException, OSError) as e:
-                        last_err = str(e)[:300]
-            if data is None:
-                failures.append({"shot_id": shot.id, "shot_index": si, "error": last_err})
-                consecutive += 1
-                if consecutive >= cfg.caption_max_consecutive_failures:
-                    # Raising here, BEFORE replace_segments, preserves the prior captions.
-                    raise CaptionError(
-                        f"aborting after {consecutive} consecutive failures "
-                        f"({len(rows)} shots captioned first); last: {last_err}")
-                continue
-            consecutive = 0
-            assert shot.id is not None
-            ok_shot_ids.append(shot.id)
-            rows.append(Segment(
-                video_id=video_id, kind="caption",
-                t_start_s=shot.t_start_s, t_end_s=shot.t_end_s,
-                frame_start=shot.frame_start, frame_end=shot.frame_end,
-                payload={
-                    "shot_index": si,
-                    "source_frame": rep.frame_start,
-                    "frame_path": rep.payload["frame_path"],
-                    "shot_type": data["shot_type"],
-                    "people_count": data["people_count"],
-                    "setting": data["setting"],
-                    "on_screen_text": data["on_screen_text"],
-                    "objects": data["objects"][:8],
-                    "description": data["description"],
-                    "caption_model": cfg.caption_model,
-                    "advisory": True,  # VLM fields are hints, never ground truth
-                },
-            ))
-    finally:
-        _ollama_unload(cfg)
+    for shot in shots:  # shot order, independent of completion order
+        assert shot.id is not None
+        if shot.id not in outcome:
+            continue  # defensive only: trip raises before assembly, so unreachable
+        data, err = outcome[shot.id]
+        si = shot.payload.get("shot_index")
+        if data is None:
+            failures.append({"shot_id": shot.id, "shot_index": si, "error": err})
+            continue
+        rep = rep_by_shot[si]
+        ok_shot_ids.append(shot.id)
+        rows.append(Segment(
+            video_id=video_id, kind="caption",
+            t_start_s=shot.t_start_s, t_end_s=shot.t_end_s,
+            frame_start=shot.frame_start, frame_end=shot.frame_end,
+            payload={
+                "shot_index": si,
+                "source_frame": rep.frame_start,
+                "frame_path": rep.payload["frame_path"],
+                "shot_type": data["shot_type"],
+                "people_count": data["people_count"],
+                "setting": data["setting"],
+                "on_screen_text": data["on_screen_text"],
+                "objects": data["objects"][:8],
+                "description": data["description"],
+                "caption_model": cfg.caption_model,
+                "advisory": True,  # VLM fields are hints, never ground truth
+            },
+        ))
 
     if failures and not rows:
         # Total failure (Ollama down / model missing) must fail loudly BEFORE the replace

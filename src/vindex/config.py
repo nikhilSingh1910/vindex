@@ -44,9 +44,9 @@ class Config:
     crf: int = 16
     preset: str = "slow"
     # Fixed N, recorded on the videos row (PLAN sanctions any fixed N): same N -> same
-    # bytes, verified by execution (two t=4 encodes hash-identical). Measured on M4 Air,
-    # preset slow: t4 = 1.6x over t1, t8 = 2.3x — sublinear, set higher on bigger boxes.
-    encode_threads: int = 4
+    # bytes, verified by execution (t=4 twice and t=8 three times hash-identical).
+    # Measured on M4 Air, preset slow: t4 = 1.6x over t1, t8 = 2.3x (sublinear).
+    encode_threads: int = 8
     audio_bitrate: str = "192k"
     # audio/video start_time must agree within one AAC frame (~21ms @ 48kHz) or we treat
     # it as an offset to persist and correct.
@@ -116,7 +116,23 @@ class Config:
     caption_max_side_px: int = 1024  # downscale before sending; 2 MP internal cap misses 1080p
     # Circuit breaker: this many consecutive per-shot failures abort the stage (a wedged
     # Ollama otherwise costs 2 x timeout x shots of wall clock before failing).
+    # Semantics identical under caption_parallel (results consumed in shot order).
     caption_max_consecutive_failures: int = 5
+    # Concurrent caption requests. >1 needs the server started with
+    # OLLAMA_NUM_PARALLEL >= this value: without it Ollama QUEUES the extra request,
+    # which silently halves the effective per-request timeout (the client budget below
+    # is therefore scaled by this value). Do NOT combine >1 with OLLAMA_KEEP_ALIVE=0
+    # (reload per request makes queued timeouts systematic). Parity gate: 30-shot A/B,
+    # 29/30 byte-identical, 1 quality-equal rewording (PLAN). Measured gain on M4
+    # Metal: ~1.1x (compute-saturated); worth more on GPU servers.
+    caption_parallel: int = 2
+    # Run transcribe (CPU-bound whisper) and caption (Ollama GPU/ANE) concurrently in
+    # the ONE pipeline process, each on its own SQLite connection (WAL). The
+    # single-process-per-DB contract is unchanged. DEFAULT FALSE: the concurrent
+    # profile (whisper+TF+wav2vec2+VLM ~12-15 GB) is unmeasured on the 16 GB dev
+    # target with two documented swap-storm shutdowns — flip only with a measured
+    # receipt (PLAN), or per-run via `vindex index --overlap`.
+    overlap_transcribe_caption: bool = False
 
     hdr_transfers: frozenset[str] = field(default_factory=lambda: HDR_TRANSFERS)
     fps_whitelist: tuple[tuple[int, int], ...] = FPS_WHITELIST

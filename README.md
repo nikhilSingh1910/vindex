@@ -62,7 +62,13 @@ brew install ffmpeg          # macOS        |  apt install ffmpeg   # Debian/Ubu
 
 # Ollama + the caption VLM (only the caption stage; skippable with --no-captions)
 brew install ollama          # or the installer from https://ollama.com
-ollama serve &               # low-disk machines: OLLAMA_KEEP_ALIVE=0 ollama serve &
+ollama serve &
+# server modes (mutually exclusive):
+#   OLLAMA_NUM_PARALLEL=2 ollama serve &   # matches caption_parallel=2 (~10% faster
+#                                          # on Metal; without it requests queue —
+#                                          # correct, the client budget covers it)
+#   OLLAMA_KEEP_ALIVE=0 ollama serve &     # low-disk mode: VLM unloads per request
+#                                          # (~9% slower; never with caption_parallel>1)
 ollama pull qwen2.5vl:3b
 ```
 

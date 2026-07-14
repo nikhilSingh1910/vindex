@@ -722,6 +722,37 @@ then re-transcribed + re-embedded corpus-wide with the music gate on. Third-sess
     person-detector score flips). Ops: the harness reaps long background tasks
     (three kills, independent of output volume) — long unattended runs need
     nohup+disown full detachment with a log-file monitor.
+- **Tier-1 speed round (2026-07-14, dawn) — parity-gated, twice adversarially
+  reviewed (≈20 findings, all blocking ones fixed pre-ship)**:
+  - **Parallel captions (caption_parallel=2)**: 30-shot A/B gate vs the live DB —
+    29/30 byte-identical, 1 quality-equal rewording (frame adjudicated by direct
+    viewing: Zidane/Real-Madrid training shot, both texts accurate). Attribution
+    test: the delta follows SERVER CONFIG (OLLAMA_NUM_PARALLEL changes batch
+    numerics at temp=0), not concurrency — within one config, concurrent ==
+    sequential. Measured gain ~1.1x on M4 Metal (compute-saturated; expect more on
+    GPU). Client timeout now scales ×caption_parallel (queueing on an unmatched
+    server otherwise silently halves the budget); breaker consumes in shot order
+    (semantics preserved); trip path shutdown(wait=True) so orphaned generations
+    can't re-arm keep-alive and defeat the VLM unload; rep-less shots no longer
+    count toward the breaker (sequential-era semantics restored).
+  - **transcribe ∥ caption overlap (--overlap; config default FALSE)**: one process,
+    per-stage connections, WAL + busy_timeout=30s (reviewer stress-verified: 60
+    forced collisions clean; stage transactions ~20 ms; write-first txns dodge the
+    BUSY_SNAPSHOT trap; embed's post-join reads see all thread commits). Failure
+    matrix tested (9 new hermetic tests): caption soft, transcribe hard-after-
+    caption-settles with FIRST_EXCEPTION early surfacing, partial states fall back
+    to sequential, mid-kill resume converges. Default stays False per review: the
+    concurrent profile (whisper+TF+wav2vec2+VLM ≈ 12-15 GB) is unmeasured on the
+    16 GB dev box with two documented shutdowns — the flip requires a measured
+    receipt from the next benchmark run.
+  - **encode_threads=8** (t8 hash-identical across three runs; 2.2-2.3x vs t1) and
+    **SigLIP batch 32** (b8-vs-b32 min cosine 1.0 over 32 real keyframes; embed runs
+    strictly after the overlap join). Person-detector batching parity also passed
+    (0/32 mismatches) but the frames-stage restructure is scope-cut: ~5% of wall,
+    real streaming-memory complexity.
+  - Known accepted edges: Ctrl-C during overlap waits for in-flight stages (printed,
+    resumable, no cancellation available); np-config changes rewrite ~3% of caption
+    texts on re-runs (advisory by contract).
 - **Speed levers round (2026-07-14, night) — three levers tried, two shipped, one
   rejected with receipts**:
   - **Incremental embed SHIPPED**: embed reuses unchanged work per space — attach-kinds

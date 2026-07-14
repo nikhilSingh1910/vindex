@@ -82,7 +82,8 @@ def _load_siglip() -> _Siglip:
     raise EmbedError(f"no SigLIP checkpoint loadable; last error: {last_err}")
 
 
-def _embed_images(sig: _Siglip, paths: list[str], batch_size: int = 8) -> list[bytes]:
+def _embed_images(sig: _Siglip, paths: list[str], batch_size: int = 32) -> list[bytes]:
+    # batch 32 vs 8: verified identical outputs (min cosine 1.0 over real keyframes).
     import numpy as np
     import torch
     from PIL import Image
