@@ -770,6 +770,38 @@ then re-transcribed + re-embedded corpus-wide with the music gate on. Third-sess
     cached — loaders now fall back to local_files_only (network revalidation is
     ceremony for a cached model).
   - Creation trajectory across the three same-video benchmarks: 193 → 178 → 141 min.
+  - **VLM shootout (2026-07-15) — rigorous serial PoC, all local, all $0** (fixture:
+    46 shots / 3 videos incl. the deterministic breaker; identical conditions: serial,
+    temp=0, production prompt+typing, untimed warmup; retrieval benchmark: 9 queries
+    pre-registered from DIRECT frame viewing before any candidate ran; quality: field
+    adjudication on 8 viewed frames + zero-hallucination check):
+    | model | s/caption | proj 518 | valid | MRR | hits@3 | notes |
+    | qwen2.5vl:3b (base) | 12.17 | 105 min | 45/46 | .689 | 7/9 | 0 OCR catches; ppl errors; breaker fails (5th strike) |
+    | qwen3-vl:2b-instruct | 6.05 | 52 min | 45/46 | .770 | 8/9 | most precise sample (4th player + water bottle); reads the breaker marquee; 0 halluc |
+    | qwen3-vl:4b-instruct | 15.11 | 130 min | 46/46 | .634 | 8/9 | best qwen OCR but verbose → worst MRR; slower than base |
+    | florence-2-large MIT 0.77B (MPS) | 4.91 (3 tasks) | 42 min | 46/46 | .815 | 9/9 | best MRR+speed; best OCR (FIFASTORE.com exact); 1 mild halluc/7; no setting/shot_type; sparse objects |
+    **DECISION (staged): caption_model default → qwen3-vl:2b-instruct** (dominates
+    baseline on every axis; one-line change; caption 105→52 min on the benchmark
+    video, i.e. T1 creation ~141→~85-90 min projected). **florence-2 = round-2
+    dedicated-backend candidate** behind the Captioner protocol (best end-goal metric
+    + fastest + MIT, but needs backend work, setting/shot_type synthesis, and a
+    larger-sample hallucination gate). Receipts/traps: Ollama's bare qwen3-vl tags
+    are THINKING variants — empty responses under format=json (46/46 failure mode);
+    -instruct required. microsoft/Florence-2 trust_remote_code is transformers-5
+    incompatible (4.x-era custom code) — native Florence2ForConditionalGeneration +
+    the florence-community converted checkpoint works. The 2.5vl breaker frame is a
+    text-dense 2026 squad marquee (JSON string-escape failure on OCR-ish content;
+    qwen3 family reads it clean). Moondream 3.1 license read: component-use in
+    commercial products explicitly permitted (only Moondream-as-hosted-service
+    restricted) — eligible, deferred on 9B footprint/Photon runtime. FastVLM license
+    still unread — parked. Text-heavy frames remain qwen3-2b's residual failure mode
+    (shot 153, 1/46) — per-shot retry+isolation already contains it.
+  - **Caption bottleneck policy (Nikhil, 2026-07-15): host-vision captioning is the
+    LAST RESORT** — design stays on the roadmap (backend switch + MCP manifest/commit,
+    typed validation reused) but is not to be built while free/local alternatives
+    remain unexplored: token cost lands on the driving agent and it breaks unattended
+    batch. Explore first: faster local VLMs/runtimes (dedicated captioners, MLX,
+    batch-serving on GPU). This entry is the pointer; the exploration receipts follow.
 - **Speed levers round (2026-07-14, night) — three levers tried, two shipped, one
   rejected with receipts**:
   - **Incremental embed SHIPPED**: embed reuses unchanged work per space — attach-kinds

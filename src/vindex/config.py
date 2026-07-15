@@ -107,9 +107,15 @@ class Config:
 
     # --- caption (Ollama) ---
     ollama_url: str = "http://localhost:11434"
-    # 7B q4 is the plan default for servers; 3b is the documented 16GB/small-disk fallback
-    # (dev M4 Air runs 3b — 7B is a 6 GB download / ~15 GB RSS unpinned).
-    caption_model: str = "qwen2.5vl:3b"
+    # Shootout winner (PLAN 2026-07-15, 46-shot cross-content fixture, pre-registered
+    # retrieval benchmark): qwen3-vl:2b-instruct beat qwen2.5vl:3b on EVERY axis —
+    # 2.0x faster (6.05 vs 12.17 s/caption), better retrieval (MRR .770 vs .689),
+    # zero sample hallucinations, smaller (1.9 vs 3.2 GB), and it captions the frame
+    # class that deterministically broke 2.5vl. MUST be the -instruct tag: Ollama's
+    # bare qwen3-vl tags are THINKING variants that return empty under format=json.
+    # (4b-instruct measured: slower than baseline AND worst MRR — verbosity hurts
+    # retrieval. florence-2: best MRR/speed, tracked as a future dedicated backend.)
+    caption_model: str = "qwen3-vl:2b-instruct"
     caption_num_ctx: int = 4096      # pin: the GGUF declares 125K and Ollama over-allocates
     caption_num_predict: int = 512
     caption_timeout_s: float = 120.0

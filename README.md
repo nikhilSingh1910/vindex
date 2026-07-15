@@ -35,7 +35,7 @@ ingest → shots → frames → transcribe → caption → embed
 | shots | frame-exact shot boundaries | PySceneDetect |
 | frames | keyframes every 3 s, dHash+person-state dedup, camera-motion labels | OpenCV, torchvision |
 | transcribe | sentence segments + forced-aligned word timestamps, hallucination guards, music-authoritative gate (music/noise/silence regions, advisory lyrics) | faster-whisper large-v3, inaSpeechSegmenter, wav2vec2 CTC |
-| caption | one advisory VLM caption per shot (typed, guarded, per-shot failure isolation) | Qwen2.5-VL via Ollama |
+| caption | one advisory VLM caption per shot (typed, guarded, per-shot failure isolation) | Qwen3-VL via Ollama |
 | embed | image + text + audio spaces in one SQLite BLOB column, scoped by model/dim | SigLIP 2, bge-small, CLAP |
 
 Everything lands in a single SQLite database. The pipeline is resumable (jobs table),
@@ -69,7 +69,7 @@ ollama serve &
 #                                          # correct, the client budget covers it)
 #   OLLAMA_KEEP_ALIVE=0 ollama serve &     # low-disk mode: VLM unloads per request
 #                                          # (~9% slower; never with caption_parallel>1)
-ollama pull qwen2.5vl:3b
+ollama pull qwen3-vl:2b-instruct   # MUST be -instruct (bare tags are thinking variants)
 ```
 
 **2. Install the package**
@@ -129,7 +129,7 @@ Useful to know:
   or the embed stage failed — check
   `sqlite3 vindex_data/index.db "select stage,status from jobs;"`.
 - Indexing is deliberately slow-and-accurate (pinned single-threaded mezzanine encode,
-  large models; overnight-batch philosophy). An 8-minute 1080p video takes ~2-3 h on a
+  large models; overnight-batch philosophy). A worst-case 8-minute fast-cut 1080p video takes ~1.5 h on a
   16 GB M4 Air, dominated by the per-shot VLM captions.
 
 ## Development
