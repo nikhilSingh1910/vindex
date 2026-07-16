@@ -796,6 +796,26 @@ then re-transcribed + re-embedded corpus-wide with the music gate on. Third-sess
     restricted) — eligible, deferred on 9B footprint/Photon runtime. FastVLM license
     still unread — parked. Text-heavy frames remain qwen3-2b's residual failure mode
     (shot 153, 1/46) — per-shot retry+isolation already contains it.
+  - **MLX-whisper gate (2026-07-16) — REJECTED, Air-tuning book closed**: mlx-community
+    whisper-large-v3 on jobs2005 vs the verified reference, turbo's pre-registered bar.
+    Attempt 1 (defaults): catastrophic long-form death spiral — WER 101%, 441 one-second
+    hallucinated segments, zero phrase matches — mlx-whisper has NO VAD, applause enters
+    the context window and condition_on_previous_text drags hallucination forward
+    (slice-level output was verbatim-perfect, so the model is fine; the long-form decode
+    path is not). **Safety fact worth its own line: all 441 hallucinated segments PASSED
+    the production no_speech/logprob guards** — decode-level hallucination is invisible
+    to post-hoc filters; Silero VAD is load-bearing, not an optimization. Attempt 2
+    (condition_on_previous_text=False): wall 184.7 s = **6.8x faster** — but WER 3.19%
+    (turbo rejected at 2.54%) and segmentation 330→191 (median 3.8 s, not sentence
+    scale) = the exact cut-refinement-breaking coarsening the bar exists to catch.
+    Consistent rule, consistent verdict: REJECTED as a drop-in. Unexplored round-3
+    variant recorded honestly: mlx + punctuation/word-time re-segmentation layer might
+    recover sentence bounds at ~6x speed, but that is new segmentation semantics
+    needing its own validation, not a runtime swap. **Air ceiling therefore stands:
+    ~9x worst-case / ~5x typical / ~2.5x scenery today; ~7x/3x/1.5-2x with Florence
+    backend + np2 + file input; 1:1 requires GPU server hardware (per-stage budgets:
+    encode 0.4x on 16 threads, CUDA whisper 0.2x, vLLM captions 0.4x, overlap ->
+    0.8-1.0x critical path).**
   - **Caption bottleneck policy (Nikhil, 2026-07-15): host-vision captioning is the
     LAST RESORT** — design stays on the roadmap (backend switch + MCP manifest/commit,
     typed validation reused) but is not to be built while free/local alternatives
